@@ -139,19 +139,25 @@ class _Hero extends StatelessWidget {
     return SizedBox(
       height: height,
       child: Stack(fit: StackFit.expand, children: [
-        // artwork fades into the page background at the bottom
-        ShaderMask(
-          blendMode: BlendMode.dstIn,
-          shaderCallback: (r) => const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black, Colors.black, Colors.transparent], stops: [0, 0.72, 1]).createShader(r),
-          child: Stack(fit: StackFit.expand, children: [
-            for (var i = 0; i < list.length; i++)
-              AnimatedOpacity(
-                opacity: i == index ? 1 : 0,
-                duration: const Duration(milliseconds: 700),
-                child: CachedNetworkImage(imageUrl: list[i].cover ?? list[i].banner ?? '', fit: BoxFit.cover, errorWidget: (_, __, ___) => const SizedBox()),
-              ),
-            Container(color: C.k(0.4)),
-          ]),
+        // artwork (only the current picture is loaded) fading into the page background at the bottom
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 600),
+          child: SizedBox.expand(
+            key: ValueKey(a.id),
+            child: CachedNetworkImage(
+              imageUrl: a.cover ?? a.banner ?? '',
+              fit: BoxFit.cover,
+              memCacheWidth: 900,
+              fadeInDuration: const Duration(milliseconds: 200),
+              placeholder: (_, __) => Container(color: C.w(0.04)),
+              errorWidget: (_, __, ___) => Container(color: C.w(0.04)),
+            ),
+          ),
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [C.k(0.45), C.k(0.25), C.k(0.55), Colors.black], stops: const [0, 0.35, 0.78, 1]),
+          ),
         ),
         Positioned(
           left: 16,
@@ -562,13 +568,13 @@ class _RankedRow extends StatelessWidget {
                 opacity: 0.2,
                 child: ColorFiltered(
                   colorFilter: const ColorFilter.matrix(<double>[0.33, 0.33, 0.33, 0, 0, 0.33, 0.33, 0.33, 0, 0, 0.33, 0.33, 0.33, 0, 0, 0, 0, 0, 1, 0]),
-                  child: CachedNetworkImage(imageUrl: a.banner ?? a.poster ?? '', fit: BoxFit.cover, errorWidget: (_, __, ___) => const SizedBox()),
+                  child: CachedNetworkImage(imageUrl: a.banner ?? a.thumb ?? '', fit: BoxFit.cover, memCacheWidth: 500, errorWidget: (_, __, ___) => const SizedBox()),
                 ),
               ),
             ),
           ),
           Row(children: [
-            SizedBox(width: 64, height: 96, child: CachedNetworkImage(imageUrl: a.thumb ?? '', fit: BoxFit.cover, errorWidget: (_, __, ___) => Container(color: C.w(0.1)))),
+            SizedBox(width: 64, height: 96, child: CachedNetworkImage(imageUrl: a.thumb ?? '', fit: BoxFit.cover, memCacheWidth: 200, errorWidget: (_, __, ___) => Container(color: C.w(0.1)))),
             const SizedBox(width: 12),
             Expanded(
               child: Padding(

@@ -17,7 +17,7 @@ Future<void> main() async {
     systemNavigationBarIconBrightness: Brightness.light,
   ));
   await Supabase.initialize(url: AppConfig.supabaseUrl, anonKey: AppConfig.supabaseKey);
-  await Auth.instance.init();
+  Auth.instance.init(); // the profile loads in the background; the app opens right away
   runApp(const AniBiarApp());
 }
 

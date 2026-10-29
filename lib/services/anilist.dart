@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/config.dart';
 
@@ -241,22 +242,16 @@ class AniList {
     return null;
   }
 
-  Future<Map<String, dynamic>> _request(String body) async {
-    await _acquire();
-    try {
-      final viaSite = await _viaSite(body);
-      if (viaSite != null) return viaSite;
-    } finally {
-      _release();
-    }
+  /// AniList asked directly from the phone (with retries). Used when the site is slow or down.
+  Future<Map<String, dynamic>> _direct(String body) async {
     Object last = Exception("Couldn't reach AniList. Check your connection and try again.");
-    for (var attempt = 0; attempt <= 3; attempt++) {
+    for (var attempt = 0; attempt <= 2; attempt++) {
       await _acquire();
       http.Response? res;
       try {
         res = await http
             .post(Uri.parse(_endpoint), headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: body)
-            .timeout(const Duration(seconds: 20));
+            .timeout(const Duration(seconds: 15));
       } catch (_) {
         last = Exception("Couldn't reach AniList. Check your connection and try again.");
       } finally {
@@ -271,33 +266,113 @@ class AniList {
         }
         if (res.statusCode == 429 || res.statusCode >= 500) {
           last = Exception(res.statusCode == 429 ? 'AniList is busy right now. Try again in a moment.' : 'AniList is having problems (${res.statusCode}).');
-          if (attempt < 3) {
+          if (attempt < 2) {
             final retry = int.tryParse(res.headers['retry-after'] ?? '') ?? 0;
-            await Future<void>.delayed(Duration(milliseconds: retry > 0 ? retry.clamp(1, 10) * 1000 : 1500 * (attempt + 1)));
+            await Future<void>.delayed(Duration(milliseconds: retry > 0 ? retry.clamp(1, 8) * 1000 : 1200 * (attempt + 1)));
             continue;
           }
           throw last;
         }
         throw Exception('AniList error ${res.statusCode}');
       }
-      if (attempt < 3) await Future<void>.delayed(Duration(seconds: 1 << attempt));
+      if (attempt < 2) await Future<void>.delayed(Duration(milliseconds: 600 * (attempt + 1)));
     }
     throw last;
   }
 
-  Future<Map<String, dynamic>> query(String q, Map<String, dynamic> variables) {
+  /// Hedged: ask the site's cached door first; if it has not answered within 2.5 s (or fails),
+  /// ask AniList too and take whichever answers first.
+  Future<Map<String, dynamic>> _request(String body) {
+    final done = Completer<Map<String, dynamic>>();
+    var directStarted = false;
+    var failures = 0;
+    void fail(Object e) {
+      failures++;
+      if (failures >= 2 && !done.isCompleted) done.completeError(e);
+    }
+
+    void ok(Map<String, dynamic> d) {
+      if (!done.isCompleted) done.complete(d);
+    }
+
+    void startDirect() {
+      if (directStarted) return;
+      directStarted = true;
+      _direct(body).then(ok, onError: fail);
+    }
+
+    _viaSite(body).then((d) {
+      if (d != null) {
+        ok(d);
+      } else {
+        fail(Exception('site'));
+        startDirect();
+      }
+    }, onError: (Object e) {
+      fail(e);
+      startDirect();
+    });
+    Timer(const Duration(milliseconds: 2500), () {
+      if (!done.isCompleted) startDirect();
+    });
+    return done.future;
+  }
+
+  /* ---- persistent cache: the last good answer is kept on the phone so the app opens instantly ---- */
+
+  static String _hash(String s) {
+    var h = 5381;
+    for (final c in s.codeUnits) {
+      h = ((h << 5) + h + c) & 0x7fffffff;
+    }
+    return '${h.toRadixString(36)}${s.length.toRadixString(36)}';
+  }
+
+  Future<({DateTime at, Map<String, dynamic> data})?> _readStore(String body) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString('al:${_hash(body)}');
+      if (raw == null) return null;
+      final j = jsonDecode(raw) as Map<String, dynamic>;
+      return (at: DateTime.fromMillisecondsSinceEpoch(j['t'] as int), data: Map<String, dynamic>.from(j['d'] as Map));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeStore(String body, Map<String, dynamic> data) async {
+    try {
+      final raw = jsonEncode({'t': DateTime.now().millisecondsSinceEpoch, 'd': data});
+      if (raw.length > 300000) return;
+      final p = await SharedPreferences.getInstance();
+      await p.setString('al:${_hash(body)}', raw);
+    } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>> query(String q, Map<String, dynamic> variables) async {
     final body = jsonEncode({'query': q, 'variables': variables});
     final hit = _memory[body];
-    if (hit != null && DateTime.now().difference(hit.at) < _memoryTtl) return Future.value(hit.data);
+    if (hit != null && DateTime.now().difference(hit.at) < _memoryTtl) return hit.data;
+    final stored = await _readStore(body);
+    if (stored != null && DateTime.now().difference(stored.at) < _memoryTtl) {
+      _memory[body] = stored;
+      return stored.data;
+    }
     final pending = _inflight[body] ??= _request(body).then((data) {
       _memory[body] = (at: DateTime.now(), data: data);
+      _writeStore(body, data);
       return data;
     }).catchError((Object e) {
       // Better to show slightly old data than an error.
-      final old = _memory[body];
+      final old = _memory[body] ?? stored;
       if (old != null) return old.data;
       throw e;
     }).whenComplete(() => _inflight.remove(body));
+    // Older than 5 minutes but still on the phone: show it now and refresh in the background.
+    if (stored != null && DateTime.now().difference(stored.at) < const Duration(days: 2)) {
+      unawaited(pending.then((_) {}, onError: (Object _) {}));
+      return stored.data;
+    }
     return pending;
   }
 

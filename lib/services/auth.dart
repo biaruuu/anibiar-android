@@ -40,6 +40,7 @@ class Auth extends ChangeNotifier {
 
   Future<void> init() async {
     user = db.auth.currentUser;
+    ready = true;
     _sub = db.auth.onAuthStateChange.listen((event) {
       final changed = user?.id != event.session?.user.id;
       user = event.session?.user;

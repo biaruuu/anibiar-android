@@ -117,7 +117,7 @@ class _InfoScreenState extends State<InfoScreen> {
             ShaderMask(
               blendMode: BlendMode.dstIn,
               shaderCallback: (r) => const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black, Colors.black, Colors.transparent], stops: [0, 0.6, 1]).createShader(r),
-              child: CachedNetworkImage(imageUrl: a.banner ?? a.poster ?? '', fit: BoxFit.cover, errorWidget: (_, __, ___) => const SizedBox()),
+              child: CachedNetworkImage(imageUrl: a.banner ?? a.poster ?? '', fit: BoxFit.cover, memCacheWidth: 900, errorWidget: (_, __, ___) => const SizedBox()),
             ),
             Container(color: C.k(0.25)),
           ]),
@@ -128,7 +128,7 @@ class _InfoScreenState extends State<InfoScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                SizedBox(width: 118, child: Poster(url: a.poster, radius: 14)),
+                SizedBox(width: 118, child: Poster(url: a.poster, radius: 14, cacheWidth: 420)),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Padding(
@@ -261,7 +261,7 @@ class _Rail extends StatelessWidget {
                 onTap: () => onTap(a),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Poster(
-                    url: a.poster,
+                    url: a.thumb,
                     child: tag == null || tag.isEmpty
                         ? null
                         : Align(

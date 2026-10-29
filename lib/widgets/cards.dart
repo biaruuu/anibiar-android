@@ -8,11 +8,12 @@ import 'glass.dart';
 
 /// Poster image with the faint ring the website uses.
 class Poster extends StatelessWidget {
-  const Poster({super.key, this.url, this.radius = 12, this.aspect = 2 / 3, this.child});
+  const Poster({super.key, this.url, this.radius = 12, this.aspect = 2 / 3, this.child, this.cacheWidth = 340});
   final String? url;
   final double radius;
   final double aspect;
   final Widget? child;
+  final int cacheWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +24,7 @@ class Poster extends StatelessWidget {
         foregroundDecoration: BoxDecoration(borderRadius: BorderRadius.circular(radius), border: Border.all(color: C.w(0.12))),
         clipBehavior: Clip.antiAlias,
         child: Stack(fit: StackFit.expand, children: [
-          if (url != null && url!.isNotEmpty) CachedNetworkImage(imageUrl: url!, fit: BoxFit.cover, fadeInDuration: const Duration(milliseconds: 150), errorWidget: (_, __, ___) => const SizedBox()),
+          if (url != null && url!.isNotEmpty) CachedNetworkImage(imageUrl: url!, fit: BoxFit.cover, memCacheWidth: cacheWidth, fadeInDuration: const Duration(milliseconds: 120), errorWidget: (_, __, ___) => const SizedBox()),
           if (child != null) child!,
         ]),
       ),
@@ -54,7 +55,7 @@ class EpisodeCard extends StatelessWidget {
       onTap: onTap,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Poster(
-          url: a.poster,
+          url: a.thumb,
           child: Stack(children: [
             Positioned(
               left: 0,

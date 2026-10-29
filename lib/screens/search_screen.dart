@@ -159,7 +159,7 @@ class SearchScreenState extends State<SearchScreen> {
                 final eps = a.aired;
                 return PosterTile(
                   title: a.name,
-                  image: a.poster,
+                  image: a.thumb,
                   onTap: () => openInfo(context, a.id),
                   chips: [
                     if (eps > 0) Chip2('$eps', icon: Icons.closed_caption_outlined),

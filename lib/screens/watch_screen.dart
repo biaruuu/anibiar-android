@@ -480,7 +480,7 @@ class _WatchScreenState extends State<WatchScreen> {
                 child: GestureDetector(
                   onTap: () => openWatch(context, r.media.id),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Poster(url: r.media.poster),
+                    Poster(url: r.media.thumb),
                     const SizedBox(height: 6),
                     Text(r.media.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, height: 1.25, fontWeight: FontWeight.w600)),
                   ]),
