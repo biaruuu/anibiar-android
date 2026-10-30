@@ -2,6 +2,7 @@ import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
 
 import '../core/theme.dart';
@@ -9,13 +10,15 @@ import '../widgets/cards.dart' show clock;
 import '../widgets/glass.dart';
 import 'player_model.dart';
 
-/// Small bag of switches that live in the settings menu and are remembered by the watch page.
+/// Switches that live in the settings menu and are remembered by the watch page.
 class PlayerPrefs {
   PlayerPrefs({this.autoplay = true, this.autoNext = true, this.autoSkip = true});
   bool autoplay;
   bool autoNext;
   bool autoSkip;
 }
+
+double _cl(double min, double v, double max) => v < min ? min : (v > max ? max : v);
 
 Future<void> enterFullscreen(BuildContext context, PlayerModel model, String title, PlayerPrefs prefs, VoidCallback onPrefs) async {
   await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
@@ -31,11 +34,28 @@ Future<void> enterFullscreen(BuildContext context, PlayerModel model, String tit
     ),
     transitionsBuilder: (_, a, __, child) => FadeTransition(opacity: a, child: child),
   ));
+  model.closeMenu();
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 }
 
-class PlayerView extends StatelessWidget {
+/// Subtitle font: Trebuchet MS where the phone has it, otherwise Open Sans (a similar humanist face).
+TextStyle _captionFont(double size) {
+  String? open;
+  try {
+    open = GoogleFonts.openSans(fontWeight: FontWeight.w700).fontFamily;
+  } catch (_) {}
+  return TextStyle(
+    fontFamily: 'Trebuchet MS',
+    fontFamilyFallback: [if (open != null) open, 'sans-serif'],
+    fontSize: size,
+    fontWeight: FontWeight.w700,
+    height: 1.35,
+    letterSpacing: 0.05,
+  );
+}
+
+class PlayerView extends StatefulWidget {
   const PlayerView({super.key, required this.model, required this.title, required this.prefs, required this.onPrefs, this.fullscreen = false});
 
   final PlayerModel model;
@@ -45,272 +65,374 @@ class PlayerView extends StatelessWidget {
   final bool fullscreen;
 
   @override
+  State<PlayerView> createState() => _PlayerViewState();
+}
+
+class _PlayerViewState extends State<PlayerView> {
+  Offset? _tap;
+
+  PlayerModel get m => widget.model;
+
+  void _toggleFullscreen() {
+    if (widget.fullscreen) {
+      Navigator.of(context).maybePop();
+    } else {
+      enterFullscreen(context, m, widget.title, widget.prefs, widget.onPrefs);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: model,
+      listenable: m,
       builder: (context, _) {
-        final video = Container(
-          color: Colors.black,
-          child: Stack(fit: StackFit.expand, children: [
-            if (model.ready)
-              Center(child: AspectRatio(aspectRatio: model.aspect, child: VideoPlayer(model.c!))),
-            _Captions(model: model, fullscreen: fullscreen),
-            _Gestures(model: model, fullscreen: fullscreen, title: title, prefs: prefs, onPrefs: onPrefs),
-            if (model.loading || (model.buffering && model.ready))
-              const IgnorePointer(child: Center(child: SizedBox(width: 38, height: 38, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white)))),
-            _SkipLayer(model: model),
-            AnimatedOpacity(
-              opacity: model.controlsVisible ? 1 : 0,
-              duration: const Duration(milliseconds: 180),
-              child: IgnorePointer(
-                ignoring: !model.controlsVisible,
-                child: _Controls(model: model, title: title, fullscreen: fullscreen, prefs: prefs, onPrefs: onPrefs),
+        final body = LayoutBuilder(builder: (context, box) {
+          final w = box.maxWidth;
+          final h = box.maxHeight;
+          final pad = _cl(8, w * 0.022, 20);
+          final btn = _cl(36, w * 0.045, 46);
+          final icon = _cl(20, w * 0.034, 28);
+          final side = _cl(40, w * 0.06, 64);
+          final center = _cl(48, w * 0.07, 74);
+          final hidden = !m.controlsVisible && !m.menuOpen;
+          final topBar = btn + _cl(4, w * 0.006, 8) + pad;
+          return Container(
+            color: Colors.black,
+            child: Stack(fit: StackFit.expand, children: [
+              if (m.ready) Center(child: AspectRatio(aspectRatio: m.aspect, child: VideoPlayer(m.c!))),
+              _Captions(model: m, w: w),
+              // taps: show/hide controls; double tap: left third back, right third forward, middle fullscreen
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  if (m.menuOpen) {
+                    m.closeMenu();
+                  } else {
+                    m.toggleControls();
+                  }
+                },
+                onDoubleTapDown: (d) => _tap = d.localPosition,
+                onDoubleTap: () {
+                  final x = _tap?.dx ?? w / 2;
+                  if (x < w / 3) {
+                    m.seekBy(-10);
+                    m.flash(-1);
+                  } else if (x > w * 2 / 3) {
+                    m.seekBy(10);
+                    m.flash(1);
+                  } else {
+                    _toggleFullscreen();
+                  }
+                },
               ),
-            ),
-          ]),
-        );
-        return fullscreen ? video : AspectRatio(aspectRatio: 16 / 9, child: video);
+              if (m.seekFlash != null)
+                Positioned(
+                  top: h / 2 - side / 2,
+                  left: m.seekFlash == -1 ? w * 0.12 : null,
+                  right: m.seekFlash == 1 ? w * 0.12 : null,
+                  child: IgnorePointer(
+                    child: Container(
+                      width: side,
+                      height: side,
+                      decoration: BoxDecoration(color: C.k(0.6), shape: BoxShape.circle),
+                      child: Icon(m.seekFlash == -1 ? Icons.replay_10_rounded : Icons.forward_10_rounded, color: Colors.white, size: side * 0.62),
+                    ),
+                  ),
+                ),
+              if (m.loading || (m.buffering && m.ready && hidden))
+                IgnorePointer(child: Center(child: SizedBox(width: _cl(30, w * 0.06, 52), height: _cl(30, w * 0.06, 52), child: const CircularProgressIndicator(strokeWidth: 3, color: Colors.white)))),
+              _SkipLayer(model: m, w: w, controls: !hidden),
+              // soft shade behind the controls so they read on bright frames
+              IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: hidden ? 0 : 1,
+                  duration: const Duration(milliseconds: 250),
+                  child: const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x80000000), Color(0x00000000), Color(0x00000000), Color(0x99000000)], stops: [0, 0.28, 0.6, 1]),
+                    ),
+                    child: SizedBox.expand(),
+                  ),
+                ),
+              ),
+              // ---------------- top bar: volume on the left, tools on the right ----------------
+              Positioned(
+                top: pad,
+                left: pad,
+                right: pad,
+                child: AnimatedSlide(
+                  offset: hidden ? const Offset(0, -0.3) : Offset.zero,
+                  duration: const Duration(milliseconds: 250),
+                  child: AnimatedOpacity(
+                    opacity: hidden ? 0 : 1,
+                    duration: const Duration(milliseconds: 250),
+                    child: IgnorePointer(
+                      ignoring: hidden,
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        _Pill(children: [
+                          _IconBtn(size: btn, icon: m.muted ? Icons.volume_off_rounded : Icons.volume_up_rounded, iconSize: icon, onTap: m.toggleMute),
+                        ]),
+                        if (widget.fullscreen)
+                          Expanded(child: Padding(padding: EdgeInsets.symmetric(horizontal: pad), child: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: poppins(size: _cl(12, w * 0.016, 16), weight: FontWeight.w600).copyWith(shadows: const [Shadow(blurRadius: 4, color: Color(0x99000000))]))))
+                        else
+                          const Spacer(),
+                        _Pill(children: [
+                          if (m.tracks.isNotEmpty)
+                            _IconBtn(
+                              size: btn,
+                              icon: m.track >= 0 ? Icons.closed_caption_rounded : Icons.closed_caption_outlined,
+                              iconSize: icon,
+                              onTap: () => m.setTrack(m.track >= 0 ? -1 : _firstTrack(m)),
+                            ),
+                          _IconBtn(
+                            size: btn,
+                            icon: Icons.settings_rounded,
+                            iconSize: icon,
+                            turns: m.menuOpen ? 0.125 : 0,
+                            onTap: () => m.menuOpen ? m.closeMenu() : m.openMenu(),
+                          ),
+                        ]),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+              // ---------------- centre: 10 s buttons well to either side of play/pause ----------------
+              Positioned.fill(
+                child: AnimatedOpacity(
+                  opacity: hidden || m.failed ? 0 : 1,
+                  duration: const Duration(milliseconds: 250),
+                  child: IgnorePointer(
+                    ignoring: hidden,
+                    child: Stack(children: [
+                      Positioned(left: w * 0.25 - side / 2, top: h / 2 - side / 2, child: _Round(size: side, icon: Icons.replay_10_rounded, onTap: () {
+                        m.seekBy(-10);
+                        m.touch();
+                      })),
+                      Positioned(
+                        left: w / 2 - center / 2,
+                        top: h / 2 - center / 2,
+                        child: _Round(
+                          size: center,
+                          icon: m.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                          spinner: m.buffering && m.playing,
+                          onTap: m.togglePlay,
+                        ),
+                      ),
+                      Positioned(left: w * 0.75 - side / 2, top: h / 2 - side / 2, child: _Round(size: side, icon: Icons.forward_10_rounded, onTap: () {
+                        m.seekBy(10);
+                        m.touch();
+                      })),
+                    ]),
+                  ),
+                ),
+              ),
+              // ---------------- bottom: time + fullscreen above a thin seek bar ----------------
+              Positioned(
+                left: _cl(12, w * 0.035, 48),
+                right: _cl(12, w * 0.035, 48),
+                bottom: _cl(6, w * 0.02, 28),
+                child: AnimatedSlide(
+                  offset: hidden ? const Offset(0, 0.2) : Offset.zero,
+                  duration: const Duration(milliseconds: 250),
+                  child: AnimatedOpacity(
+                    opacity: hidden ? 0 : 1,
+                    duration: const Duration(milliseconds: 250),
+                    child: IgnorePointer(
+                      ignoring: hidden,
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                          Expanded(
+                            child: Text.rich(
+                              TextSpan(children: [
+                                TextSpan(text: clock(m.position)),
+                                TextSpan(text: ' / ${clock(m.duration)}', style: TextStyle(color: C.w(0.75))),
+                                if (w > 560) TextSpan(text: '  •  ${widget.title}', style: TextStyle(color: C.w(0.75))),
+                              ]),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: poppins(size: _cl(12, w * 0.018, 16), weight: FontWeight.w500).copyWith(fontFeatures: const [FontFeature.tabularFigures()], shadows: const [Shadow(blurRadius: 3, offset: Offset(0, 1), color: Color(0x99000000))]),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: _toggleFullscreen,
+                            child: Glass(
+                              kind: GlassKind.bar,
+                              radius: _cl(12, w * 0.024, 20),
+                              width: _cl(38, w * 0.056, 54),
+                              height: _cl(29, w * 0.041, 42),
+                              alignment: Alignment.center,
+                              child: Icon(widget.fullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded, size: _cl(20, w * 0.034, 28), color: Colors.white),
+                            ),
+                          ),
+                        ]),
+                        const SizedBox(height: 2),
+                        _SeekBar(model: m),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+              // ---------------- settings menu ----------------
+              if (m.menuOpen) ...[
+                Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: m.closeMenu, child: const SizedBox.expand())),
+                Positioned(
+                  top: topBar + 4,
+                  right: pad,
+                  width: _cl(224, w * 0.4, 320),
+                  child: _Menu(model: m, prefs: widget.prefs, onPrefs: widget.onPrefs, maxHeight: (h - topBar - pad - 8).clamp(120.0, 600.0).toDouble(), w: w),
+                ),
+              ],
+            ]),
+          );
+        });
+        return widget.fullscreen ? body : AspectRatio(aspectRatio: 16 / 9, child: body);
       },
     );
   }
+
+  int _firstTrack(PlayerModel m) {
+    for (var i = 0; i < m.tracks.length; i++) {
+      final l = '${m.tracks[i].label} ${m.tracks[i].lang}'.toLowerCase();
+      if (l.contains('english') || l.startsWith('en')) return i;
+    }
+    return 0;
+  }
 }
 
-/* --------------------------------- captions --------------------------------- */
+/* ----------------------------------- pieces ----------------------------------- */
 
-TextStyle _stroke(double size) {
-  final base = poppins(size: size, weight: FontWeight.w600, height: 1.25);
-  return TextStyle(
-    fontFamily: base.fontFamily,
-    fontFamilyFallback: base.fontFamilyFallback,
-    fontSize: size,
-    fontWeight: FontWeight.w600,
-    height: 1.25,
-    foreground: Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.4
-      ..strokeJoin = StrokeJoin.round
-      ..color = Colors.black,
-  );
+class _Pill extends StatelessWidget {
+  const _Pill({required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => Glass(kind: GlassKind.bar, radius: 999, padding: const EdgeInsets.all(2), child: Row(mainAxisSize: MainAxisSize.min, children: children));
+}
+
+class _IconBtn extends StatelessWidget {
+  const _IconBtn({required this.size, required this.icon, required this.iconSize, required this.onTap, this.turns = 0});
+  final double size;
+  final IconData icon;
+  final double iconSize;
+  final VoidCallback onTap;
+  final double turns;
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Center(child: AnimatedRotation(turns: turns, duration: const Duration(milliseconds: 250), child: Icon(icon, size: iconSize, color: Colors.white, shadows: const [Shadow(blurRadius: 3, offset: Offset(0, 1), color: Color(0x99000000))]))),
+        ),
+      );
+}
+
+class _Round extends StatelessWidget {
+  const _Round({required this.size, required this.icon, required this.onTap, this.spinner = false});
+  final double size;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool spinner;
+  @override
+  Widget build(BuildContext context) => Glass(
+        kind: GlassKind.bar,
+        radius: size / 2,
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        onTap: onTap,
+        child: spinner ? SizedBox(width: size * 0.42, height: size * 0.42, child: const CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : Icon(icon, size: size * 0.62, color: Colors.white),
+      );
 }
 
 class _Captions extends StatelessWidget {
-  const _Captions({required this.model, required this.fullscreen});
+  const _Captions({required this.model, required this.w});
   final PlayerModel model;
-  final bool fullscreen;
+  final double w;
 
   @override
   Widget build(BuildContext context) {
-    final text = model.caption.replaceAll(RegExp(r'<[^>]*>'), '').trim();
-    if (text.isEmpty) return const SizedBox.shrink();
-    final size = fullscreen ? 20.0 : 13.5;
-    final lift = model.controlsVisible ? (fullscreen ? 64.0 : 44.0) : (fullscreen ? 26.0 : 10.0);
+    final text = model.caption.replaceAll(RegExp(r'<[^>]*>'), '').replaceAll('&amp;', '&').replaceAll('&lt;', '<').replaceAll('&gt;', '>').trim();
+    if (text.isEmpty || model.track < 0) return const SizedBox.shrink();
+    // same sizing as the website: clamp(0.85rem, 2.6cqw, 2.5rem) times the chosen size
+    final size = _cl(13.6, w * 0.026, 40) * model.captionScale;
+    final lift = _cl(34, w * 0.065, 80);
+    final fill = _captionFont(size).copyWith(color: Colors.white);
+    Widget label;
+    if (model.captionBox) {
+      label = Container(
+        padding: EdgeInsets.symmetric(horizontal: size * 0.6, vertical: size * 0.12),
+        decoration: BoxDecoration(color: C.k(0.75), borderRadius: BorderRadius.circular(size * 0.35)),
+        child: Text(text, textAlign: TextAlign.center, style: fill),
+      );
+    } else {
+      // dark outline, no box: white text reads on any frame
+      final stroke = _captionFont(size).copyWith(
+        foreground: Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = size * 0.2
+          ..strokeJoin = StrokeJoin.round
+          ..color = const Color(0xEB000000),
+        shadows: [Shadow(blurRadius: size * 0.3, color: const Color(0xA6000000))],
+      );
+      label = Stack(alignment: Alignment.center, children: [
+        Text(text, textAlign: TextAlign.center, style: stroke),
+        Text(text, textAlign: TextAlign.center, style: fill),
+      ]);
+    }
     return Positioned(
-      left: 24,
-      right: 24,
+      left: w * 0.05,
+      right: w * 0.05,
       bottom: lift,
-      child: IgnorePointer(
-        child: AnimatedPadding(
-          duration: const Duration(milliseconds: 180),
-          padding: EdgeInsets.zero,
-          child: Stack(alignment: Alignment.center, children: [
-            // heavy dark outline so white text reads on any frame (no box)
-            Text(text, textAlign: TextAlign.center, style: _stroke(size)),
-            Text(text, textAlign: TextAlign.center, style: poppins(size: size, weight: FontWeight.w600, height: 1.25)),
-          ]),
-        ),
-      ),
+      child: IgnorePointer(child: Center(child: ConstrainedBox(constraints: BoxConstraints(maxWidth: size * 52), child: label))),
     );
   }
 }
 
-/* ---------------------------------- gestures --------------------------------- */
-
-class _Gestures extends StatefulWidget {
-  const _Gestures({required this.model, required this.fullscreen, required this.title, required this.prefs, required this.onPrefs});
-  final PlayerModel model;
-  final bool fullscreen;
-  final String title;
-  final PlayerPrefs prefs;
-  final VoidCallback onPrefs;
-
-  @override
-  State<_Gestures> createState() => _GesturesState();
-}
-
-class _GesturesState extends State<_Gestures> {
-  Offset? _tap;
-
-  @override
-  Widget build(BuildContext context) {
-    final model = widget.model;
-    return LayoutBuilder(builder: (context, box) {
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: model.toggleControls,
-        onDoubleTapDown: (d) => _tap = d.localPosition,
-        // Double tap: left third rewinds, right third skips ahead, middle toggles fullscreen.
-        onDoubleTap: () {
-          final x = _tap?.dx ?? box.maxWidth / 2;
-          if (x < box.maxWidth / 3) {
-            model.seekBy(-10);
-            model.showControls();
-          } else if (x > box.maxWidth * 2 / 3) {
-            model.seekBy(10);
-            model.showControls();
-          } else if (widget.fullscreen) {
-            Navigator.of(context).maybePop();
-          } else {
-            enterFullscreen(context, model, widget.title, widget.prefs, widget.onPrefs);
-          }
-        },
-      );
-    });
-  }
-}
-
-/* ------------------------------- skip intro/outro ------------------------------ */
-
 class _SkipLayer extends StatelessWidget {
-  const _SkipLayer({required this.model});
+  const _SkipLayer({required this.model, required this.w, required this.controls});
   final PlayerModel model;
+  final double w;
+  final bool controls;
 
   @override
   Widget build(BuildContext context) {
     final toast = model.skipToast;
     final target = model.skipTarget;
     if (toast == null && target == null) return const SizedBox.shrink();
+    final fs = _cl(12, w * 0.02, 16);
     return Positioned(
-      right: 14,
-      bottom: model.controlsVisible ? 58 : 16,
+      right: _cl(12, w * 0.035, 48),
+      bottom: controls ? _cl(46, w * 0.1, 96) : _cl(14, w * 0.03, 40),
       child: toast != null
           ? Glass(
               kind: GlassKind.panel,
               radius: 14,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Text(toast.kind == SkipKind.intro ? 'Intro skipped' : 'Outro skipped', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(toast.kind == SkipKind.intro ? 'Intro skipped' : 'Outro skipped', style: poppins(size: fs, weight: FontWeight.w500)),
                 const SizedBox(width: 12),
-                GestureDetector(onTap: model.undoSkip, child: const Text('Undo', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white, decoration: TextDecoration.underline))),
+                GestureDetector(onTap: model.undoSkip, child: Text('Undo', style: poppins(size: fs, weight: FontWeight.w700).copyWith(decoration: TextDecoration.underline))),
               ]),
             )
-          : GlassButton(
-              label: target == SkipKind.intro ? 'Skip Intro' : 'Skip Outro',
-              icon: Icons.skip_next_rounded,
-              kind: GlassKind.white,
-              height: 38,
-              fontSize: 13,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+          : GestureDetector(
               onTap: () => model.skipTo(target!, automatic: false),
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: fs * 1.1, vertical: fs * 0.6),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(99), boxShadow: [BoxShadow(color: C.k(0.4), blurRadius: 18, offset: const Offset(0, 6))]),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(target == SkipKind.intro ? 'Skip Intro' : 'Skip Outro', style: poppins(size: fs, weight: FontWeight.w600, color: Colors.black)),
+                  SizedBox(width: fs * 0.4),
+                  Icon(Icons.forward_10_rounded, size: fs * 1.5, color: Colors.black),
+                ]),
+              ),
             ),
     );
   }
 }
 
-/* ----------------------------------- controls ---------------------------------- */
-
-class _Controls extends StatelessWidget {
-  const _Controls({required this.model, required this.title, required this.fullscreen, required this.prefs, required this.onPrefs});
-  final PlayerModel model;
-  final String title;
-  final bool fullscreen;
-  final PlayerPrefs prefs;
-  final VoidCallback onPrefs;
-
-  @override
-  Widget build(BuildContext context) {
-    final pad = fullscreen ? 20.0 : 8.0;
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xB3000000), Color(0x00000000), Color(0x00000000), Color(0xCC000000)], stops: [0, 0.3, 0.6, 1]),
-      ),
-      child: Stack(children: [
-        // top bar
-        Positioned(
-          top: pad,
-          left: pad + 4,
-          right: pad + 4,
-          child: Row(children: [
-            if (fullscreen) ...[
-              GlassIconButton(icon: Icons.arrow_back_rounded, size: 38, iconSize: 20, onTap: () => Navigator.of(context).maybePop()),
-              const SizedBox(width: 10),
-            ],
-            Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: fullscreen ? 16 : 13, fontWeight: FontWeight.w700, color: Colors.white))),
-            GlassIconButton(
-              icon: Icons.settings_rounded,
-              size: 38,
-              iconSize: 20,
-              onTap: () {
-                model.touch();
-                showPlayerMenu(context, model, prefs, onPrefs);
-              },
-            ),
-          ]),
-        ),
-        // centre
-        Center(
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            _Round(icon: Icons.replay_10_rounded, size: fullscreen ? 52 : 40, onTap: () {
-              model.seekBy(-10);
-              model.touch();
-            }),
-            SizedBox(width: fullscreen ? 36 : 22),
-            _Round(
-              icon: model.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              size: fullscreen ? 72 : 56,
-              iconSize: fullscreen ? 40 : 32,
-              white: true,
-              onTap: model.togglePlay,
-            ),
-            SizedBox(width: fullscreen ? 36 : 22),
-            _Round(icon: Icons.forward_10_rounded, size: fullscreen ? 52 : 40, onTap: () {
-              model.seekBy(10);
-              model.touch();
-            }),
-          ]),
-        ),
-        // bottom: seek bar + time + fullscreen
-        Positioned(
-          left: pad,
-          right: pad,
-          bottom: fullscreen ? 14 : 2,
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            _SeekBar(model: model),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(children: [
-                Text('${clock(model.position)} / ${clock(model.duration)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white, fontFeatures: [FontFeature.tabularFigures()])),
-                const Spacer(),
-                if (model.speed != 1) Padding(padding: const EdgeInsets.only(right: 10), child: Text('${model.speed}x', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white))),
-                GestureDetector(
-                  onTap: () {
-                    if (fullscreen) {
-                      Navigator.of(context).maybePop();
-                    } else {
-                      enterFullscreen(context, model, title, prefs, onPrefs);
-                    }
-                  },
-                  child: Padding(padding: const EdgeInsets.all(6), child: Icon(fullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded, size: 24, color: Colors.white)),
-                ),
-              ]),
-            ),
-          ]),
-        ),
-      ]),
-    );
-  }
-}
-
-class _Round extends StatelessWidget {
-  const _Round({required this.icon, required this.onTap, this.size = 44, this.iconSize, this.white = false});
-  final IconData icon;
-  final VoidCallback onTap;
-  final double size;
-  final double? iconSize;
-  final bool white;
-  @override
-  Widget build(BuildContext context) => GlassIconButton(icon: icon, onTap: onTap, size: size, iconSize: iconSize ?? size * 0.58, kind: white ? GlassKind.white : GlassKind.btn);
-}
-
+/// Thin progress bar: grows a little while held, white thumb.
 class _SeekBar extends StatefulWidget {
   const _SeekBar({required this.model});
   final PlayerModel model;
@@ -329,185 +451,220 @@ class _SeekBarState extends State<_SeekBar> {
     double buffered = 0;
     final v = m.c?.value;
     if (v != null && v.buffered.isNotEmpty) buffered = (v.buffered.last.end.inMilliseconds / 1000 / dur).clamp(0.0, 1.0).toDouble();
+    final h = _drag != null ? 6.0 : 4.0;
     return SizedBox(
-      height: 28,
-      child: Stack(alignment: Alignment.center, children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Stack(children: [
-            Container(height: 4, decoration: BoxDecoration(color: C.w(0.25), borderRadius: BorderRadius.circular(2))),
-            FractionallySizedBox(widthFactor: buffered, child: Container(height: 4, decoration: BoxDecoration(color: C.w(0.35), borderRadius: BorderRadius.circular(2)))),
+      height: 26,
+      child: LayoutBuilder(builder: (context, box) {
+        final width = box.maxWidth;
+        double at(double dx) => (dx / width).clamp(0.0, 1.0).toDouble();
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (d) => m.seekTo(at(d.localPosition.dx) * dur),
+          onHorizontalDragStart: (d) {
+            m.seeking = true;
+            setState(() => _drag = at(d.localPosition.dx) * dur);
+          },
+          onHorizontalDragUpdate: (d) => setState(() => _drag = at(d.localPosition.dx) * dur),
+          onHorizontalDragEnd: (_) async {
+            final t = _drag;
+            if (t != null) await m.seekTo(t);
+            m.seeking = false;
+            if (mounted) setState(() => _drag = null);
+            m.touch();
+          },
+          child: Stack(alignment: Alignment.centerLeft, clipBehavior: Clip.none, children: [
+            AnimatedContainer(duration: const Duration(milliseconds: 120), height: h, width: width, decoration: BoxDecoration(color: C.w(0.3), borderRadius: BorderRadius.circular(99))),
+            AnimatedContainer(duration: const Duration(milliseconds: 120), height: h, width: width * buffered, decoration: BoxDecoration(color: C.w(0.5), borderRadius: BorderRadius.circular(99))),
+            AnimatedContainer(duration: const Duration(milliseconds: 120), height: h, width: width * value, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(99))),
+            Positioned(
+              left: (width * value - 6).clamp(0.0, width - 12).toDouble(),
+              child: AnimatedOpacity(
+                opacity: _drag != null ? 1 : 0.0,
+                duration: const Duration(milliseconds: 120),
+                child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
+              ),
+            ),
           ]),
-        ),
-        SliderTheme(
-          data: SliderThemeData(
-            trackHeight: 4,
-            activeTrackColor: Colors.white,
-            inactiveTrackColor: Colors.transparent,
-            thumbColor: Colors.white,
-            overlayColor: C.w(0.15),
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-            trackShape: const RoundedRectSliderTrackShape(),
-          ),
-          child: Slider(
-            value: value,
-            onChangeStart: (_) {
-              m.seeking = true;
-            },
-            onChanged: (x) => setState(() => _drag = x * dur),
-            onChangeEnd: (x) async {
-              await m.seekTo(x * dur);
-              m.seeking = false;
-              setState(() => _drag = null);
-              m.touch();
-            },
-          ),
-        ),
-      ]),
+        );
+      }),
     );
   }
 }
 
 /* ------------------------------------ menu ------------------------------------- */
 
-enum _View { main, speed, quality, captions }
+class _Menu extends StatelessWidget {
+  const _Menu({required this.model, required this.prefs, required this.onPrefs, required this.maxHeight, required this.w});
+  final PlayerModel model;
+  final PlayerPrefs prefs;
+  final VoidCallback onPrefs;
+  final double maxHeight;
+  final double w;
 
-void showPlayerMenu(BuildContext context, PlayerModel model, PlayerPrefs prefs, VoidCallback onPrefs) {
-  var view = _View.main;
-  showGlassSheet<void>(context, builder: (ctx) {
-    return StatefulBuilder(builder: (ctx, set) {
-      Widget row(String label, String value, {VoidCallback? onTap, IconData? icon}) => _Row(label: label, value: value, icon: icon, onTap: onTap);
-      Widget opt(String label, bool on, VoidCallback onTap, {String? hint}) => _Opt(label: label, selected: on, onTap: onTap, hint: hint);
-      final children = <Widget>[];
-      var title = '';
-      switch (view) {
-        case _View.main:
-          title = 'Settings';
-          final q = model.quality < 0 || model.quality >= model.levels.length ? 'Auto' : '${model.levels[model.quality].height}p';
-          children.addAll([
-            if (model.levels.isNotEmpty) row('Quality', q, icon: Icons.high_quality_rounded, onTap: () => set(() => view = _View.quality)),
-            row('Speed', model.speed == 1 ? 'Normal' : '${model.speed}x', icon: Icons.speed_rounded, onTap: () => set(() => view = _View.speed)),
-            row('Captions', model.tracks.isEmpty ? 'Built in' : (model.track < 0 ? 'Off' : model.tracks[model.track].label), icon: Icons.closed_caption_rounded, onTap: model.tracks.isEmpty ? null : () => set(() => view = _View.captions)),
-            row('Auto skip intro/outro', model.intro == null && model.outro == null ? 'No data' : (prefs.autoSkip ? 'On' : 'Off'), icon: Icons.fast_forward_rounded, onTap: () {
-              prefs.autoSkip = !prefs.autoSkip;
-              model.autoSkip = prefs.autoSkip;
-              onPrefs();
-              set(() {});
-            }),
-            row('Autoplay', prefs.autoplay ? 'On' : 'Off', icon: Icons.play_circle_outline_rounded, onTap: () {
-              prefs.autoplay = !prefs.autoplay;
-              model.autoplay = prefs.autoplay;
-              onPrefs();
-              set(() {});
-            }),
-            row('Auto next episode', prefs.autoNext ? 'On' : 'Off', icon: Icons.skip_next_rounded, onTap: () {
-              prefs.autoNext = !prefs.autoNext;
-              model.autoNext = prefs.autoNext;
-              onPrefs();
-              set(() {});
-            }),
-          ]);
-        case _View.speed:
-          title = 'Speed';
-          for (final s in const [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]) {
-            children.add(opt(s == 1 ? 'Normal' : '${s}x', model.speed == s, () async {
-              await model.setSpeed(s);
-              set(() => view = _View.main);
-            }));
-          }
-        case _View.quality:
-          title = 'Quality';
-          children.add(opt('Auto', model.quality < 0, () {
-            model.setQuality(-1);
-            Navigator.of(ctx).pop();
-          }, hint: 'Picks the best quality your connection can handle.'));
-          for (var i = 0; i < model.levels.length; i++) {
-            final idx = i;
-            children.add(opt('${model.levels[i].height}p', model.quality == i, () {
-              model.setQuality(idx);
-              Navigator.of(ctx).pop();
-            }));
-          }
-        case _View.captions:
-          title = 'Captions';
-          children.add(opt('Off', model.track < 0, () async {
-            await model.setTrack(-1);
-            set(() => view = _View.main);
+  @override
+  Widget build(BuildContext context) {
+    final m = model;
+    final fs = _cl(12.5, w * 0.022, 15);
+    final view = m.menuView;
+    Widget row(String label, String value, {VoidCallback? onTap, bool chevron = true}) => _MenuRow(label: label, value: value, onTap: onTap, chevron: chevron, fs: fs);
+    Widget opt(String label, bool on, VoidCallback onTap, {String? hint}) => _MenuOpt(label: label, selected: on, onTap: onTap, hint: hint, fs: fs);
+    final items = <Widget>[];
+    var title = 'Settings';
+    switch (view) {
+      case 'captions':
+        title = 'Captions';
+        items.add(opt('Off', m.track < 0, () {
+          m.setTrack(-1);
+          m.setMenuView('main');
+        }));
+        for (var i = 0; i < m.tracks.length; i++) {
+          final idx = i;
+          items.add(opt(m.tracks[i].label, m.track == i, () {
+            m.setTrack(idx);
+            m.setMenuView('main');
           }));
-          for (var i = 0; i < model.tracks.length; i++) {
-            final idx = i;
-            children.add(opt(model.tracks[i].label, model.track == i, () async {
-              await model.setTrack(idx);
-              set(() => view = _View.main);
-            }));
-          }
-      }
-      return ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.8),
+        }
+      case 'style':
+        title = 'Caption style';
+        items.add(_MenuHead('Size', fs));
+        for (final e in const [('Small', 0.88), ('Medium', 1.1), ('Large', 1.4)]) {
+          items.add(opt(e.$1, (m.captionScale - e.$2).abs() < 0.01, () => m.setCaptionStyle(scale: e.$2)));
+        }
+        items.add(_MenuHead('Style', fs));
+        items.add(opt('Outline', !m.captionBox, () => m.setCaptionStyle(box: false)));
+        items.add(opt('Dark box', m.captionBox, () => m.setCaptionStyle(box: true)));
+      case 'speed':
+        title = 'Speed';
+        for (final s in const [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]) {
+          items.add(opt(s == 1 ? 'Normal' : '${s}x', m.speed == s, () async {
+            await m.setSpeed(s);
+            m.setMenuView('main');
+          }));
+        }
+      case 'quality':
+        title = 'Quality';
+        items.add(opt('Auto', m.quality < 0, () {
+          m.setQuality(-1);
+          m.closeMenu();
+        }, hint: 'Picks the best quality your connection can handle.'));
+        for (var i = 0; i < m.levels.length; i++) {
+          final idx = i;
+          items.add(opt('${m.levels[i].height}p', m.quality == i, () {
+            m.setQuality(idx);
+            m.closeMenu();
+          }));
+        }
+      default:
+        final q = m.quality < 0 || m.quality >= m.levels.length ? 'Auto' : '${m.levels[m.quality].height}p';
+        items.addAll([
+          if (m.levels.isNotEmpty) row('Quality', q, onTap: () => m.setMenuView('quality')),
+          row('Captions', m.tracks.isEmpty ? 'Built in' : (m.track < 0 ? 'Off' : m.tracks[m.track].label), onTap: m.tracks.isEmpty ? null : () => m.setMenuView('captions')),
+          if (m.tracks.isNotEmpty) row('Caption style', '', onTap: () => m.setMenuView('style')),
+          row('Speed', m.speed == 1 ? 'Normal' : '${m.speed}x', onTap: () => m.setMenuView('speed')),
+          row('Autoplay', prefs.autoplay ? 'On' : 'Off', chevron: false, onTap: () {
+            prefs.autoplay = !prefs.autoplay;
+            m.autoplay = prefs.autoplay;
+            onPrefs();
+            m.setMenuView('main');
+          }),
+          row('Auto skip intro/outro', m.intro == null && m.outro == null ? 'No data' : (prefs.autoSkip ? 'On' : 'Off'), chevron: false, onTap: () {
+            prefs.autoSkip = !prefs.autoSkip;
+            m.autoSkip = prefs.autoSkip;
+            onPrefs();
+            m.setMenuView('main');
+          }),
+          row('Auto next episode', prefs.autoNext ? 'On' : 'Off', chevron: false, onTap: () {
+            prefs.autoNext = !prefs.autoNext;
+            m.autoNext = prefs.autoNext;
+            onPrefs();
+            m.setMenuView('main');
+          }),
+        ]);
+    }
+    return Glass(
+      kind: GlassKind.panel,
+      radius: 18,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(8, 10, 8, 14),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
+          padding: const EdgeInsets.all(8),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+              padding: const EdgeInsets.fromLTRB(6, 2, 6, 8),
               child: Row(children: [
-                if (view != _View.main) GestureDetector(onTap: () => set(() => view = _View.main), child: const Padding(padding: EdgeInsets.only(right: 8), child: Icon(Icons.arrow_back_rounded, size: 22))),
-                Expanded(child: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
-                GestureDetector(onTap: () => Navigator.of(ctx).pop(), child: Icon(Icons.close_rounded, color: C.w(0.8))),
+                if (view != 'main') GestureDetector(onTap: () => m.setMenuView('main'), child: Padding(padding: const EdgeInsets.only(right: 8), child: Icon(Icons.arrow_back_rounded, size: fs + 6, color: Colors.white))),
+                Expanded(child: Text(title, style: poppins(size: fs + 1.5, weight: FontWeight.w600))),
               ]),
             ),
-            ...children,
+            ...items,
           ]),
         ),
-      );
-    });
-  });
+      ),
+    );
+  }
 }
 
-class _Row extends StatelessWidget {
-  const _Row({required this.label, required this.value, this.icon, this.onTap});
+class _MenuHead extends StatelessWidget {
+  const _MenuHead(this.text, this.fs);
+  final String text;
+  final double fs;
+  @override
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.fromLTRB(8, 8, 8, 4), child: Text(text.toUpperCase(), style: poppins(size: fs - 2, weight: FontWeight.w600, color: C.w(0.5))));
+}
+
+class _MenuRow extends StatelessWidget {
+  const _MenuRow({required this.label, required this.value, required this.onTap, required this.chevron, required this.fs});
   final String label;
   final String value;
-  final IconData? icon;
   final VoidCallback? onTap;
+  final bool chevron;
+  final double fs;
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: Opacity(
-          opacity: onTap == null ? 0.5 : 1,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
-            child: Row(children: [
-              if (icon != null) ...[Icon(icon, size: 20, color: C.w(0.8)), const SizedBox(width: 12)],
-              Expanded(child: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600))),
-              Flexible(child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, color: C.w(0.6)))),
-              if (onTap != null) Icon(Icons.chevron_right_rounded, color: C.w(0.4)),
-            ]),
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Opacity(
+            opacity: onTap == null ? 0.5 : 1,
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: fs * 0.75),
+              decoration: BoxDecoration(color: C.w(0.07), borderRadius: BorderRadius.circular(12)),
+              child: Row(children: [
+                Expanded(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: poppins(size: fs, weight: FontWeight.w500))),
+                if (value.isNotEmpty) Flexible(child: Padding(padding: const EdgeInsets.only(left: 8), child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: poppins(size: fs - 1, color: C.w(0.65))))),
+                if (chevron) Icon(Icons.chevron_right_rounded, size: fs + 4, color: C.w(0.45)),
+              ]),
+            ),
           ),
         ),
       );
 }
 
-class _Opt extends StatelessWidget {
-  const _Opt({required this.label, required this.selected, required this.onTap, this.hint});
+class _MenuOpt extends StatelessWidget {
+  const _MenuOpt({required this.label, required this.selected, required this.onTap, required this.fs, this.hint});
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final double fs;
   final String? hint;
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(child: Text(label, style: TextStyle(fontSize: 15, fontWeight: selected ? FontWeight.w800 : FontWeight.w600))),
-              if (selected) const Icon(Icons.check_rounded, size: 20),
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: fs * 0.7),
+            decoration: BoxDecoration(color: selected ? C.w(0.16) : C.w(0.06), borderRadius: BorderRadius.circular(12)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Expanded(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: poppins(size: fs, weight: selected ? FontWeight.w700 : FontWeight.w500))),
+                if (selected) Icon(Icons.check_rounded, size: fs + 4, color: Colors.white),
+              ]),
+              if (hint != null) Padding(padding: const EdgeInsets.only(top: 3), child: Text(hint!, style: poppins(size: fs - 2.5, color: C.w(0.5)))),
             ]),
-            if (hint != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(hint!, style: TextStyle(fontSize: 12, color: C.w(0.5)))),
-          ]),
+          ),
         ),
       );
 }

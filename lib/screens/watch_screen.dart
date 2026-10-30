@@ -51,6 +51,7 @@ class _WatchScreenState extends State<WatchScreen> {
   @override
   void initState() {
     super.initState();
+    _player.loadCaptionPrefs();
     _player.onTime = _remember;
     _player.onEnded = _ended;
     _player.onFail = _failed;
@@ -197,7 +198,7 @@ class _WatchScreenState extends State<WatchScreen> {
     } else {
       start = _player.position;
     }
-    await _player.open(url: s.src, hls: s.hls, subtitles: s.soft ? s.subtitles : const [], startAt: start, intro: k.intro, outro: k.outro, length: k.length);
+    await _player.open(url: s.src, hls: s.hls, headers: s.headers, subtitles: s.soft ? s.subtitles : const [], startAt: start, intro: k.intro, outro: k.outro, length: k.length);
   }
 
   void _failed() {

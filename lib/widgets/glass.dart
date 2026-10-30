@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 
 /// The website's glass styles (glass-btn, glass-white, glass-accent, glass-danger, glass-panel, glass-nav, glass-track).
-enum GlassKind { btn, white, accent, danger, panel, nav, track }
+enum GlassKind { btn, white, accent, danger, panel, nav, track, bar }
 
 class _Spec {
   const _Spec(this.top, this.bottom, this.border, this.blur, this.highlight, this.shadow);
@@ -31,6 +31,9 @@ _Spec _spec(GlassKind k) {
       return _Spec(const Color.fromRGBO(44, 44, 50, 0.72), const Color.fromRGBO(12, 12, 15, 0.84), C.w(0.14), 26, 0.2, 0.55);
     case GlassKind.nav:
       return _Spec(const Color.fromRGBO(70, 70, 76, 0.5), const Color.fromRGBO(22, 22, 25, 0.64), C.w(0.14), 24, 0.24, 0.65);
+    case GlassKind.bar:
+      // thin frosted glass of the website's video player
+      return _Spec(const Color.fromRGBO(255, 255, 255, 0.14), const Color.fromRGBO(255, 255, 255, 0.07), C.w(0.16), 16, 0.22, 0.25);
     case GlassKind.track:
       return _Spec(const Color.fromRGBO(70, 70, 76, 0.45), const Color.fromRGBO(20, 20, 23, 0.62), C.w(0.14), 20, 0.2, 0.4);
   }

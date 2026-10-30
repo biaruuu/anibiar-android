@@ -4,6 +4,12 @@ class AppConfig {
   /// skip times and the cached AniList door, so it sees exactly the same data as the website.
   static const siteUrl = String.fromEnvironment('SITE_URL', defaultValue: 'https://anibiartv.vercel.app');
 
+  /// The streaming API the website uses (Anivexa). The app talks to it directly, no website in between.
+  static const anivexaUrl = String.fromEnvironment('ANIVEXA_URL', defaultValue: 'https://anibiartv-api.vercel.app');
+
+  /// Providers to ask, in priority order.
+  static const providers = ['anikoto', 'aniwaves', 'animegg'];
+
   /// Same Supabase project as the website (the publishable key is public by design; row-level security protects the data).
   static const supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://zrlzsrakfzfayegvvisg.supabase.co');
   static const supabaseKey = String.fromEnvironment('SUPABASE_KEY', defaultValue: 'sb_publishable_PIaz0dn6UgqXTLwm80fBfw_hImeudBy');

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -39,6 +40,16 @@ class PlayerModel extends ChangeNotifier {
   List<Caption> _caps = [];
   SkipKind? skipTarget;
   ({SkipKind kind, double from})? skipToast;
+
+  // menu + visuals shared by the inline and the fullscreen player
+  bool menuOpen = false;
+  String menuView = 'main';
+  bool muted = false;
+  double volume = 1;
+  int? seekFlash; // -1 back, 1 forward (brief)
+  double captionScale = 0.88; // Small
+  bool captionBox = false; // Outline
+  Map<String, String> _headers = const {};
 
   // data from the page
   Range? intro;
@@ -79,6 +90,7 @@ class PlayerModel extends ChangeNotifier {
     required String url,
     required bool hls,
     required List<StreamSubtitle> subtitles,
+    Map<String, String> headers = const {},
     double startAt = 0,
     Range? intro,
     Range? outro,
@@ -99,6 +111,7 @@ class PlayerModel extends ChangeNotifier {
     quality = -1;
     _master = url;
     _hls = hls;
+    _headers = headers;
     await _start(url, startAt, play: autoplay);
     if (_disposed) return;
     // captions: English (or the default one) first
@@ -128,6 +141,7 @@ class PlayerModel extends ChangeNotifier {
     final ctrl = VideoPlayerController.networkUrl(
       Uri.parse(url),
       formatHint: _hls ? VideoFormat.hls : VideoFormat.other,
+      httpHeaders: _headers,
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
     );
     try {
@@ -139,6 +153,7 @@ class PlayerModel extends ChangeNotifier {
       c = ctrl;
       ctrl.addListener(_tick);
       await ctrl.setPlaybackSpeed(speed);
+      await ctrl.setVolume(muted ? 0 : volume);
       if (startAt > 1) await ctrl.seekTo(Duration(milliseconds: (startAt * 1000).round()));
       loading = false;
       notifyListeners();
@@ -156,7 +171,7 @@ class PlayerModel extends ChangeNotifier {
 
   Future<void> _parseLevels(String master) async {
     try {
-      final r = await http.get(Uri.parse(master)).timeout(const Duration(seconds: 10));
+      final r = await http.get(Uri.parse(master), headers: _headers).timeout(const Duration(seconds: 10));
       final text = utf8.decode(r.bodyBytes);
       if (!text.contains('#EXT-X-STREAM-INF')) return;
       final lines = const LineSplitter().convert(text);
@@ -195,7 +210,7 @@ class PlayerModel extends ChangeNotifier {
     notifyListeners();
     if (i < 0 || i >= tracks.length) return;
     try {
-      final r = await http.get(Uri.parse(tracks[i].src)).timeout(const Duration(seconds: 20));
+      final r = await http.get(Uri.parse(tracks[i].src), headers: tracks[i].headers).timeout(const Duration(seconds: 20));
       final text = utf8.decode(r.bodyBytes, allowMalformed: true);
       if (track != i || _disposed) return;
       var caps = WebVTTCaptionFile(text).captions;
@@ -240,6 +255,63 @@ class PlayerModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> toggleMute() async {
+    muted = !muted;
+    await c?.setVolume(muted ? 0 : volume);
+    notifyListeners();
+    _bump();
+  }
+
+  void flash(int dir) {
+    seekFlash = dir;
+    notifyListeners();
+    Timer(const Duration(milliseconds: 550), () {
+      if (seekFlash == dir) {
+        seekFlash = null;
+        notifyListeners();
+      }
+    });
+  }
+
+  void openMenu() {
+    menuView = 'main';
+    menuOpen = true;
+    _hide?.cancel();
+    controlsVisible = true;
+    notifyListeners();
+  }
+
+  void closeMenu() {
+    menuOpen = false;
+    notifyListeners();
+    _bump();
+  }
+
+  void setMenuView(String v) {
+    menuView = v;
+    notifyListeners();
+  }
+
+  Future<void> loadCaptionPrefs() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      captionScale = p.getDouble('anibiar:capScale') ?? 0.88;
+      captionBox = p.getBool('anibiar:capBox') ?? false;
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> setCaptionStyle({double? scale, bool? box}) async {
+    if (scale != null) captionScale = scale;
+    if (box != null) captionBox = box;
+    notifyListeners();
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setDouble('anibiar:capScale', captionScale);
+      await p.setBool('anibiar:capBox', captionBox);
+    } catch (_) {}
+  }
+
   /* ------------------------------ controls visibility ------------------------------ */
 
   void showControls() {
@@ -261,7 +333,7 @@ class PlayerModel extends ChangeNotifier {
     _hide?.cancel();
     if (!controlsVisible || !playing) return;
     _hide = Timer(const Duration(milliseconds: 3500), () {
-      if (playing && !seeking) hideControls();
+      if (playing && !seeking && !menuOpen) hideControls();
     });
   }
 

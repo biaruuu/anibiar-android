@@ -1,11 +1,18 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/config.dart';
 
-/// Talks to the AniBiar TV website's own API (episodes, streams, skip times, avatar decorations),
-/// so the app always shows exactly what the website shows.
+/* ------------------------------------------------------------------------------------------
+ * Everything here talks straight to the services the website uses, no website API in between:
+ *   - episodes and streams: the Anivexa API
+ *   - intro / outro times: AniSkip
+ *   - avatar decorations: the Supabase table
+ * Stream links need a Referer header; the player sends it itself, so no proxy is needed.
+ * ---------------------------------------------------------------------------------------- */
 
 class ApiException implements Exception {
   ApiException(this.message);
@@ -22,32 +29,23 @@ class Range {
     if (j is! Map) return null;
     final s = j['start'];
     final e = j['end'];
-    if (s is num && e is num) return Range(s.toDouble(), e.toDouble());
+    if (s is num && e is num && e > s) return Range(s.toDouble(), e.toDouble());
     return null;
   }
 }
 
 class WatchEpisode {
-  WatchEpisode({required this.number, required this.title, this.description, this.image, this.airDate, this.duration, this.filler = false, this.providers = const []});
+  WatchEpisode({required this.number, required this.title, this.description, this.image, this.airDate, this.duration, this.filler = false, List<String>? providers}) : providers = providers ?? [];
   final int number;
-  final String title;
-  final String? description;
-  final String? image;
-  final String? airDate;
-  final int? duration;
+  String title;
+  String? description;
+  String? image;
+  String? airDate;
+  int? duration;
   final bool filler;
-  final List<String> providers;
 
-  factory WatchEpisode.fromJson(Map<String, dynamic> j) => WatchEpisode(
-        number: (j['number'] as num).toInt(),
-        title: (j['title'] as String?) ?? 'Episode ${j['number']}',
-        description: j['description'] as String?,
-        image: j['image'] as String?,
-        airDate: j['airDate'] as String?,
-        duration: (j['duration'] as num?)?.toInt(),
-        filler: j['filler'] == true,
-        providers: ((j['providers'] as List?) ?? const []).map((e) => '$e').toList(),
-      );
+  /// Providers that have this episode, in priority order.
+  final List<String> providers;
 }
 
 class EpisodesPayload {
@@ -55,24 +53,19 @@ class EpisodesPayload {
   final String? title;
   final List<WatchEpisode> sub;
   final List<WatchEpisode> dub;
-
-  factory EpisodesPayload.fromJson(Map<String, dynamic> j) => EpisodesPayload(
-        title: j['title'] as String?,
-        sub: ((j['sub'] as List?) ?? const []).map((e) => WatchEpisode.fromJson(e as Map<String, dynamic>)).toList(),
-        dub: ((j['dub'] as List?) ?? const []).map((e) => WatchEpisode.fromJson(e as Map<String, dynamic>)).toList(),
-      );
 }
 
 class StreamSubtitle {
-  StreamSubtitle({required this.label, required this.lang, required this.src, required this.isDefault});
+  StreamSubtitle({required this.label, required this.lang, required this.src, required this.isDefault, this.headers = const {}});
   final String label;
   final String lang;
   final String src;
   final bool isDefault;
+  final Map<String, String> headers;
 }
 
 class StreamSource {
-  StreamSource({required this.id, required this.name, required this.soft, required this.hls, required this.src, required this.subtitles, this.intro, this.outro});
+  StreamSource({required this.id, required this.name, required this.soft, required this.hls, required this.src, required this.headers, required this.subtitles, this.intro, this.outro});
   final String id;
   final String name;
 
@@ -80,27 +73,10 @@ class StreamSource {
   final bool soft;
   final bool hls;
   final String src;
+  final Map<String, String> headers;
   final List<StreamSubtitle> subtitles;
   final Range? intro;
   final Range? outro;
-
-  factory StreamSource.fromJson(Map<String, dynamic> j) => StreamSource(
-        id: '${j['id']}',
-        name: (j['name'] as String?) ?? 'Server',
-        soft: j['kind'] != 'hard',
-        hls: j['format'] != 'file',
-        src: AppConfig.abs(j['src'] as String),
-        subtitles: ((j['subtitles'] as List?) ?? const [])
-            .map((e) => StreamSubtitle(
-                  label: (e['label'] as String?) ?? 'Subtitles',
-                  lang: (e['srclang'] as String?) ?? '',
-                  src: AppConfig.abs(e['src'] as String),
-                  isDefault: e['default'] == true,
-                ))
-            .toList(),
-        intro: Range.from(j['intro']),
-        outro: Range.from(j['outro']),
-      );
 }
 
 class WatchPayload {
@@ -108,12 +84,6 @@ class WatchPayload {
   final List<StreamSource> streams;
   final Range? intro;
   final Range? outro;
-
-  factory WatchPayload.fromJson(Map<String, dynamic> j) => WatchPayload(
-        streams: ((j['streams'] as List?) ?? const []).map((e) => StreamSource.fromJson(e as Map<String, dynamic>)).toList(),
-        intro: Range.from(j['intro']),
-        outro: Range.from(j['outro']),
-      );
 }
 
 class SkipTimes {
@@ -134,77 +104,279 @@ class AvatarDeco {
   final double fps;
   final double scale;
 
-  factory AvatarDeco.fromJson(Map<String, dynamic> j) => AvatarDeco(
+  factory AvatarDeco.fromRow(Map<String, dynamic> j) => AvatarDeco(
         id: '${j['id']}',
         label: (j['label'] as String?) ?? '${j['id']}',
+        // the artwork files are static assets of the website
         sheet: AppConfig.abs(j['sheet'] as String),
         frames: (j['frames'] as num).toInt(),
         cols: (j['cols'] as num).toInt(),
         frameSize: (j['frame_size'] as num).toInt(),
-        fps: (j['fps'] as num).toDouble(),
-        scale: (j['scale'] as num).toDouble(),
+        fps: double.parse('${j['fps']}'),
+        scale: double.parse('${j['scale']}'),
       );
 }
+
+dynamic _decode(String s) => jsonDecode(s);
+
+const _ua = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+
+/// Invented names for the servers (the same idea as the website: real provider names are never shown).
+const _names = ['Nova', 'Orion', 'Lyra', 'Atlas', 'Comet', 'Zephyr', 'Pulse', 'Ember', 'Echo', 'Halo', 'Vega', 'Aero'];
+int _hash(String text) {
+  var h = 5381;
+  for (final c in text.codeUnits) {
+    h = (h * 33 + c) & 0xFFFFFFFF;
+  }
+  return h;
+}
+
+String _nameFor(String provider, String server, Set<String> taken) {
+  var i = _hash('$provider:${server.toLowerCase()}') % _names.length;
+  for (var n = 0; n < _names.length; n++, i = (i + 1) % _names.length) {
+    if (!taken.contains(_names[i])) {
+      taken.add(_names[i]);
+      return _names[i];
+    }
+  }
+  final fallback = 'Server ${taken.length + 1}';
+  taken.add(fallback);
+  return fallback;
+}
+
+String? _str(dynamic v) => v is String && v.trim().isNotEmpty ? v.trim() : null;
 
 class SiteApi {
   SiteApi._();
   static final SiteApi instance = SiteApi._();
 
-  Future<dynamic> _get(String path, {Duration timeout = const Duration(seconds: 40)}) async {
+  Future<dynamic> _get(String url, {required Duration timeout}) async {
     final http.Response res;
     try {
-      res = await http.get(Uri.parse(AppConfig.abs(path)), headers: {'Accept': 'application/json'}).timeout(timeout);
+      res = await http.get(Uri.parse(url), headers: {'Accept': 'application/json', 'User-Agent': _ua}).timeout(timeout);
     } catch (_) {
-      throw ApiException("Couldn't reach AniBiar. Check your connection and try again.");
+      throw ApiException('The streaming server did not answer. Try again in a moment.');
     }
     dynamic json;
     try {
-      json = jsonDecode(res.body);
+      json = res.body.length > 20000 ? await compute(_decode, res.body) : jsonDecode(res.body);
     } catch (_) {
       json = null;
     }
     if (res.statusCode != 200) {
-      final msg = json is Map ? json['error'] as String? : null;
-      throw ApiException(msg ?? 'HTTP ${res.statusCode}');
+      final msg = json is Map ? json['error'] : null;
+      throw ApiException(msg is String && msg.isNotEmpty ? msg : 'Streaming server error (HTTP ${res.statusCode}).');
     }
     return json;
   }
 
-  final Map<int, ({DateTime at, EpisodesPayload data})> _eps = {};
+  String get _base => AppConfig.anivexaUrl.replaceAll(RegExp(r'/+$'), '');
 
-  Future<EpisodesPayload> episodes(int animeId, {bool force = false}) async {
+  /* --------------------------------- episodes --------------------------------- */
+
+  final Map<int, ({DateTime at, EpisodesPayload data})> _eps = {};
+  final Map<int, Future<EpisodesPayload>> _epsInflight = {};
+
+  Future<EpisodesPayload> episodes(int animeId, {bool force = false}) {
     final hit = _eps[animeId];
-    if (!force && hit != null && DateTime.now().difference(hit.at).inMinutes < 5) return hit.data;
-    final json = await _get('/api/anime/$animeId/episodes');
-    final data = EpisodesPayload.fromJson(json as Map<String, dynamic>);
-    _eps[animeId] = (at: DateTime.now(), data: data);
-    return data;
+    if (!force && hit != null && DateTime.now().difference(hit.at).inMinutes < 10) return Future.value(hit.data);
+    return _epsInflight[animeId] ??= _fetchEpisodes(animeId).then((d) {
+      _eps[animeId] = (at: DateTime.now(), data: d);
+      return d;
+    }).whenComplete(() => _epsInflight.remove(animeId));
   }
+
+  List<WatchEpisode> _merge(List<String> order, Map<String, dynamic> data, String audio) {
+    final byNumber = <int, WatchEpisode>{};
+    for (final provider in order) {
+      final p = data[provider];
+      final list = p is Map ? ((p['episodes'] as Map?)?[audio] as List?) : null;
+      for (final raw in list ?? const []) {
+        if (raw is! Map) continue;
+        final number = int.tryParse('${raw['number']}');
+        if (number == null || number < 0) continue;
+        final have = byNumber[number];
+        final dur = raw['duration'] is num ? (raw['duration'] as num).toInt() : null;
+        if (have == null) {
+          byNumber[number] = WatchEpisode(
+            number: number,
+            title: _str(raw['title']) ?? 'Episode $number',
+            description: _str(raw['description']),
+            image: _str(raw['image']),
+            airDate: _str(raw['airDate']),
+            duration: dur,
+            filler: raw['filler'] == true,
+            providers: [provider],
+          );
+        } else {
+          have.providers.add(provider);
+          if (RegExp(r'^Episode \d+$').hasMatch(have.title) && _str(raw['title']) != null) have.title = _str(raw['title'])!;
+          have.description ??= _str(raw['description']);
+          have.image ??= _str(raw['image']);
+          have.airDate ??= _str(raw['airDate']);
+          have.duration ??= dur;
+        }
+      }
+    }
+    return byNumber.values.toList()..sort((a, b) => a.number.compareTo(b.number));
+  }
+
+  Future<EpisodesPayload> _fetchEpisodes(int id) async {
+    final order = AppConfig.providers;
+    final data = await _get('$_base/episodes/${order.join('/')}/$id?map=false', timeout: const Duration(seconds: 58)) as Map<String, dynamic>;
+    final sub = _merge(order, data, 'sub');
+    final dub = _merge(order, data, 'dub');
+    if (sub.isEmpty && dub.isEmpty) throw ApiException('No server has this anime yet. Try again later.');
+    String? title;
+    for (final p in order) {
+      final m = data[p];
+      final t = m is Map ? _str((m['meta'] as Map?)?['title']) : null;
+      if (t != null) {
+        title = t;
+        break;
+      }
+    }
+    return EpisodesPayload(title: title, sub: sub, dub: dub);
+  }
+
+  /* ----------------------------------- streams ----------------------------------- */
+
+  final Map<String, ({DateTime at, WatchPayload data})> _watch = {};
 
   Future<WatchPayload> watch(int animeId, {required bool dub, required int episode, List<String> providers = const []}) async {
-    final p = providers.isEmpty ? '' : '&p=${providers.join(',')}';
-    final json = await _get('/api/anime/$animeId/watch?audio=${dub ? 'dub' : 'sub'}&ep=$episode$p', timeout: const Duration(seconds: 70));
-    return WatchPayload.fromJson(json as Map<String, dynamic>);
+    final key = '$animeId:${dub ? 'dub' : 'sub'}:$episode:${providers.join(',')}';
+    final hit = _watch[key];
+    // stream links expire quickly, so they are only reused for a minute and a half
+    if (hit != null && DateTime.now().difference(hit.at).inSeconds < 90) return hit.data;
+    final audio = dub ? 'dub' : 'sub';
+    final order = AppConfig.providers.where((p) => providers.isEmpty || providers.contains(p)).toList();
+    if (order.isEmpty) throw ApiException('No server has this episode.');
+    final taken = <String>{};
+    final results = await Future.wait(order.map((provider) async {
+      try {
+        final raw = await _get('$_base/watch/$provider/$animeId/$audio/$provider-$episode', timeout: const Duration(seconds: 40));
+        return _parseWatch(provider, dub, raw as Map<String, dynamic>, taken);
+      } catch (_) {
+        return null;
+      }
+    }));
+    final streams = <StreamSource>[];
+    Range? intro;
+    Range? outro;
+    for (final r in results) {
+      if (r == null) continue;
+      streams.addAll(r.streams);
+      intro ??= r.intro;
+      outro ??= r.outro;
+    }
+    if (streams.isEmpty) throw ApiException('No playable stream was found for this episode. Try another episode or try again later.');
+    final payload = WatchPayload(streams: streams, intro: intro, outro: outro);
+    _watch[key] = (at: DateTime.now(), data: payload);
+    return payload;
   }
+
+  bool _isThumbs(Map t) => RegExp(r'thumbnail|storyboard|sprite|preview', caseSensitive: false).hasMatch('${t['url'] ?? t['src'] ?? t['file'] ?? ''} ${t['label'] ?? ''}');
+
+  ({List<StreamSource> streams, Range? intro, Range? outro}) _parseWatch(String provider, bool dub, Map<String, dynamic> data, Set<String> taken) {
+    final streams = <StreamSource>[];
+    final seen = <String>{};
+    final all = ((data['streams'] as List?) ?? const []).whereType<Map>().toList();
+    num prio(Map s) => s['priority'] is num ? s['priority'] as num : 0;
+    final ordered = [...all]..sort((a, b) {
+        final act = (b['isActive'] == true ? 1 : 0) - (a['isActive'] == true ? 1 : 0);
+        return act != 0 ? act : prio(b).compareTo(prio(a));
+      });
+    final topHeaders = data['headers'] as Map?;
+    for (final s in ordered) {
+      final type = '${s['type'] ?? ''}'.toLowerCase();
+      final format = type == 'hls' || type == 'm3u8' ? 'hls' : (type == 'mp4' ? 'file' : null);
+      final url = s['url'];
+      if (format == null || url is! String || !RegExp(r'^https?://', caseSensitive: false).hasMatch(url) || !seen.add(url)) continue;
+      final referer = _str(s['referer']) ?? _str((s['headers'] as Map?)?['Referer']) ?? _str(topHeaders?['Referer']) ?? '';
+      final ua = _str((s['headers'] as Map?)?['User-Agent']) ?? _str(topHeaders?['User-Agent']) ?? _ua;
+      final headers = <String, String>{'User-Agent': ua, 'Accept': '*/*', if (referer.isNotEmpty) 'Referer': referer};
+      if (referer.isNotEmpty) {
+        final o = Uri.tryParse(referer);
+        if (o != null && o.hasScheme && o.host.isNotEmpty) headers['Origin'] = '${o.scheme}://${o.host}${o.hasPort ? ':${o.port}' : ''}';
+      }
+      final rawSubs = ((s['subtitles'] is List && (s['subtitles'] as List).isNotEmpty) ? s['subtitles'] as List : ((data['subtitles'] as List?) ?? const [])).whereType<Map>().where((t) => !_isThumbs(t));
+      final subtitles = <StreamSubtitle>[];
+      for (final t in rawSubs) {
+        final u = t['url'] ?? t['src'] ?? t['file'];
+        if (u is! String || !RegExp(r'^https?://', caseSensitive: false).hasMatch(u)) continue;
+        final r = _str((t['headers'] as Map?)?['Referer']) ?? referer;
+        subtitles.add(StreamSubtitle(
+          label: _str(t['label']) ?? _str(t['lang']) ?? _str(t['language']) ?? 'Subtitle',
+          lang: _str(t['srclang']) ?? _str(t['lang']) ?? _str(t['language']) ?? 'und',
+          src: u,
+          isDefault: t['default'] == true,
+          headers: {'User-Agent': ua, if (r.isNotEmpty) 'Referer': r},
+        ));
+      }
+      final sub = s['subtitleType'];
+      // When a provider doesn't say, a sub stream without caption tracks has its subtitles in the picture.
+      final soft = sub == 'hardsub' ? false : (sub == 'softsub' || subtitles.isNotEmpty ? true : dub);
+      streams.add(StreamSource(
+        id: '$provider-${streams.length}',
+        name: _nameFor(provider, _str(s['server']) ?? provider, taken),
+        soft: soft,
+        hls: format == 'hls',
+        src: url,
+        headers: headers,
+        subtitles: subtitles,
+        intro: Range.from(s['intro'] ?? data['intro']),
+        outro: Range.from(s['outro'] ?? data['outro']),
+      ));
+    }
+    return (
+      streams: streams,
+      intro: Range.from(data['intro'] ?? (ordered.isNotEmpty ? ordered.first['intro'] : null)),
+      outro: Range.from(data['outro'] ?? (ordered.isNotEmpty ? ordered.first['outro'] : null)),
+    );
+  }
+
+  /* ------------------------------ intro / outro (AniSkip) ------------------------------ */
 
   Future<SkipTimes> skip(int mal, int episode) async {
     try {
-      final json = await _get('/api/skip?mal=$mal&ep=$episode', timeout: const Duration(seconds: 12)) as Map<String, dynamic>;
-      return SkipTimes(intro: Range.from(json['intro']), outro: Range.from(json['outro']), length: (json['length'] as num?)?.toDouble());
+      final res = await http
+          .get(Uri.parse('https://api.aniskip.com/v2/skip-times/$mal/$episode?types[]=op&types[]=ed&types[]=mixed-op&types[]=mixed-ed&episodeLength=0'))
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return const SkipTimes();
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+      final results = (json['results'] as List?) ?? const [];
+      Map? pick(List<String> types) {
+        for (final r in results) {
+          if (r is Map && types.contains(r['skipType'])) return r;
+        }
+        return null;
+      }
+
+      Range? range(Map? r) {
+        final i = r?['interval'];
+        return i is Map && i['startTime'] is num && i['endTime'] is num ? Range((i['startTime'] as num).toDouble(), (i['endTime'] as num).toDouble()) : null;
+      }
+
+      final op = pick(['op', 'mixed-op']);
+      final ed = pick(['ed', 'mixed-ed']);
+      final len = (op?['episodeLength'] ?? ed?['episodeLength']);
+      return SkipTimes(intro: range(op), outro: range(ed), length: len is num && len > 0 ? len.toDouble() : null);
     } catch (_) {
       return const SkipTimes();
     }
   }
 
+  /* ------------------------------- avatar decorations ------------------------------- */
+
   List<AvatarDeco>? _decos;
   Future<List<AvatarDeco>> decorations() async {
     if (_decos != null) return _decos!;
     try {
-      final json = await _get('/api/decorations', timeout: const Duration(seconds: 15)) as Map<String, dynamic>;
-      _decos = ((json['decorations'] as List?) ?? const []).map((e) => AvatarDeco.fromJson(e as Map<String, dynamic>)).toList();
+      final rows = await Supabase.instance.client.from('avatar_decorations').select().eq('active', true).order('sort', ascending: true);
+      _decos = (rows as List).map((e) => AvatarDeco.fromRow(Map<String, dynamic>.from(e as Map))).toList();
+      return _decos!;
     } catch (_) {
       return const [];
     }
-    return _decos!;
   }
 }

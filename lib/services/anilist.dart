@@ -223,7 +223,7 @@ class AniList {
     try {
       res = await http
           .post(Uri.parse('${AppConfig.siteUrl}/api/anilist'), headers: {'Content-Type': 'application/json'}, body: body)
-          .timeout(const Duration(seconds: 15));
+              .timeout(const Duration(seconds: 8));
     } catch (_) {
       return null; // can't reach the site: ask AniList directly
     }
@@ -245,13 +245,13 @@ class AniList {
   /// AniList asked directly from the phone (with retries). Used when the site is slow or down.
   Future<Map<String, dynamic>> _direct(String body) async {
     Object last = Exception("Couldn't reach AniList. Check your connection and try again.");
-    for (var attempt = 0; attempt <= 2; attempt++) {
+    for (var attempt = 0; attempt <= 1; attempt++) {
       await _acquire();
       http.Response? res;
       try {
         res = await http
             .post(Uri.parse(_endpoint), headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: body)
-            .timeout(const Duration(seconds: 15));
+            .timeout(const Duration(seconds: 10));
       } catch (_) {
         last = Exception("Couldn't reach AniList. Check your connection and try again.");
       } finally {
@@ -265,57 +265,28 @@ class AniList {
           return Map<String, dynamic>.from(json['data'] as Map);
         }
         if (res.statusCode == 429 || res.statusCode >= 500) {
-          last = Exception(res.statusCode == 429 ? 'AniList is busy right now. Try again in a moment.' : 'AniList is having problems (${res.statusCode}).');
-          if (attempt < 2) {
-            final retry = int.tryParse(res.headers['retry-after'] ?? '') ?? 0;
-            await Future<void>.delayed(Duration(milliseconds: retry > 0 ? retry.clamp(1, 8) * 1000 : 1200 * (attempt + 1)));
-            continue;
-          }
-          throw last;
+          throw Exception(res.statusCode == 429 ? 'AniList is busy right now. Try again in a moment.' : 'AniList is having problems (${res.statusCode}).');
         }
         throw Exception('AniList error ${res.statusCode}');
       }
-      if (attempt < 2) await Future<void>.delayed(Duration(milliseconds: 600 * (attempt + 1)));
+      if (attempt < 1) await Future<void>.delayed(const Duration(milliseconds: 500));
     }
     throw last;
   }
 
-  /// Hedged: ask the site's cached door first; if it has not answered within 2.5 s (or fails),
-  /// ask AniList too and take whichever answers first.
-  Future<Map<String, dynamic>> _request(String body) {
-    final done = Completer<Map<String, dynamic>>();
-    var directStarted = false;
-    var failures = 0;
-    void fail(Object e) {
-      failures++;
-      if (failures >= 2 && !done.isCompleted) done.completeError(e);
+  /// AniList is asked directly from the phone. Only if that fails (for example it is rate limiting this connection)
+  /// is the website's cached copy used as a backup.
+  Future<Map<String, dynamic>> _request(String body) async {
+    try {
+      return await _direct(body);
+    } catch (e) {
+      Map<String, dynamic>? backup;
+      try {
+        backup = await _viaSite(body);
+      } catch (_) {}
+      if (backup != null) return backup;
+      rethrow;
     }
-
-    void ok(Map<String, dynamic> d) {
-      if (!done.isCompleted) done.complete(d);
-    }
-
-    void startDirect() {
-      if (directStarted) return;
-      directStarted = true;
-      _direct(body).then(ok, onError: fail);
-    }
-
-    _viaSite(body).then((d) {
-      if (d != null) {
-        ok(d);
-      } else {
-        fail(Exception('site'));
-        startDirect();
-      }
-    }, onError: (Object e) {
-      fail(e);
-      startDirect();
-    });
-    Timer(const Duration(milliseconds: 2500), () {
-      if (!done.isCompleted) startDirect();
-    });
-    return done.future;
   }
 
   /* ---- persistent cache: the last good answer is kept on the phone so the app opens instantly ---- */
