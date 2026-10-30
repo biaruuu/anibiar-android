@@ -105,8 +105,11 @@ class PlayerState(context: Context) {
     /** Called when the viewer flips one of the three switches in the menu. */
     var onPrefsChanged: (() -> Unit)? = null
 
+    @JvmName("applyAutoplay")
     fun setAutoplay(v: Boolean) { autoplay = v; Prefs.putBool("player.autoplay", v); onPrefsChanged?.invoke() }
+    @JvmName("applyAutoNext")
     fun setAutoNext(v: Boolean) { autoNext = v; Prefs.putBool("player.autoNext", v); onPrefsChanged?.invoke() }
+    @JvmName("applyAutoSkip")
     fun setAutoSkip(v: Boolean) { autoSkip = v; Prefs.putBool("player.autoSkip", v); onPrefsChanged?.invoke() }
 
     /* ---------- data from the page ---------- */
@@ -316,6 +319,7 @@ class PlayerState(context: Context) {
 
     /* --------------------------------- quality --------------------------------- */
 
+    @JvmName("applyQuality")
     fun setQuality(index: Int) {
         if (index == quality) return
         val params = exo.trackSelectionParameters.buildUpon()
@@ -332,6 +336,7 @@ class PlayerState(context: Context) {
 
     /* --------------------------------- captions --------------------------------- */
 
+    @JvmName("applyTrack")
     fun setTrack(i: Int) {
         track = i
         cues = emptyList()
@@ -395,6 +400,7 @@ class PlayerState(context: Context) {
 
     fun seekBy(delta: Double) = seekTo(position + delta)
 
+    @JvmName("applySpeed")
     fun setSpeed(s: Float) {
         speed = s
         exo.setPlaybackSpeed(s)
@@ -426,6 +432,7 @@ class PlayerState(context: Context) {
         bump()
     }
 
+    @JvmName("applyMenuView")
     fun setMenuView(v: String) {
         menuView = v
     }
