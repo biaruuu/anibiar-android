@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import '../core/theme.dart';
 import '../widgets/cards.dart' show clock;
 import '../widgets/glass.dart';
+import '../widgets/vicon.dart';
 import 'player_model.dart';
 
 /// Switches that live in the settings menu and are remembered by the watch page.
@@ -135,7 +136,7 @@ class _PlayerViewState extends State<PlayerView> {
                       width: side,
                       height: side,
                       decoration: BoxDecoration(color: C.k(0.6), shape: BoxShape.circle),
-                      child: Icon(m.seekFlash == -1 ? Icons.replay_10_rounded : Icons.forward_10_rounded, color: Colors.white, size: side * 0.62),
+                      child: Center(child: VIcon(m.seekFlash == -1 ? 'seek_backward_10' : 'seek_forward_10', size: side * 0.74)),
                     ),
                   ),
                 ),
@@ -170,7 +171,7 @@ class _PlayerViewState extends State<PlayerView> {
                       ignoring: hidden,
                       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         _Pill(children: [
-                          _IconBtn(size: btn, icon: m.muted ? Icons.volume_off_rounded : Icons.volume_up_rounded, iconSize: icon, onTap: m.toggleMute),
+                          _IconBtn(size: btn, icon: m.muted ? 'mute' : 'volume_high', iconSize: icon, onTap: m.toggleMute),
                         ]),
                         if (widget.fullscreen)
                           Expanded(child: Padding(padding: EdgeInsets.symmetric(horizontal: pad), child: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: poppins(size: _cl(12, w * 0.016, 16), weight: FontWeight.w600).copyWith(shadows: const [Shadow(blurRadius: 4, color: Color(0x99000000))]))))
@@ -180,13 +181,13 @@ class _PlayerViewState extends State<PlayerView> {
                           if (m.tracks.isNotEmpty)
                             _IconBtn(
                               size: btn,
-                              icon: m.track >= 0 ? Icons.closed_caption_rounded : Icons.closed_caption_outlined,
+                              icon: m.track >= 0 ? 'closed_captions_on' : 'closed_captions',
                               iconSize: icon,
                               onTap: () => m.setTrack(m.track >= 0 ? -1 : _firstTrack(m)),
                             ),
                           _IconBtn(
                             size: btn,
-                            icon: Icons.settings_rounded,
+                            icon: 'settings',
                             iconSize: icon,
                             turns: m.menuOpen ? 0.125 : 0,
                             onTap: () => m.menuOpen ? m.closeMenu() : m.openMenu(),
@@ -205,7 +206,7 @@ class _PlayerViewState extends State<PlayerView> {
                   child: IgnorePointer(
                     ignoring: hidden,
                     child: Stack(children: [
-                      Positioned(left: w * 0.25 - side / 2, top: h / 2 - side / 2, child: _Round(size: side, icon: Icons.replay_10_rounded, onTap: () {
+                      Positioned(left: w * 0.25 - side / 2, top: h / 2 - side / 2, child: _Round(size: side, icon: 'seek_backward_10', onTap: () {
                         m.seekBy(-10);
                         m.touch();
                       })),
@@ -214,12 +215,12 @@ class _PlayerViewState extends State<PlayerView> {
                         top: h / 2 - center / 2,
                         child: _Round(
                           size: center,
-                          icon: m.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                          icon: m.playing ? 'pause' : 'play',
                           spinner: m.buffering && m.playing,
                           onTap: m.togglePlay,
                         ),
                       ),
-                      Positioned(left: w * 0.75 - side / 2, top: h / 2 - side / 2, child: _Round(size: side, icon: Icons.forward_10_rounded, onTap: () {
+                      Positioned(left: w * 0.75 - side / 2, top: h / 2 - side / 2, child: _Round(size: side, icon: 'seek_forward_10', onTap: () {
                         m.seekBy(10);
                         m.touch();
                       })),
@@ -262,7 +263,7 @@ class _PlayerViewState extends State<PlayerView> {
                               width: _cl(38, w * 0.056, 54),
                               height: _cl(29, w * 0.041, 42),
                               alignment: Alignment.center,
-                              child: Icon(widget.fullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded, size: _cl(20, w * 0.034, 28), color: Colors.white),
+                              child: VIcon(widget.fullscreen ? 'fullscreen_exit' : 'fullscreen', size: _cl(20, w * 0.034, 28)),
                             ),
                           ),
                         ]),
@@ -312,7 +313,7 @@ class _Pill extends StatelessWidget {
 class _IconBtn extends StatelessWidget {
   const _IconBtn({required this.size, required this.icon, required this.iconSize, required this.onTap, this.turns = 0});
   final double size;
-  final IconData icon;
+  final String icon;
   final double iconSize;
   final VoidCallback onTap;
   final double turns;
@@ -323,7 +324,7 @@ class _IconBtn extends StatelessWidget {
         child: SizedBox(
           width: size,
           height: size,
-          child: Center(child: AnimatedRotation(turns: turns, duration: const Duration(milliseconds: 250), child: Icon(icon, size: iconSize, color: Colors.white, shadows: const [Shadow(blurRadius: 3, offset: Offset(0, 1), color: Color(0x99000000))]))),
+          child: Center(child: AnimatedRotation(turns: turns, duration: const Duration(milliseconds: 250), child: VIcon(icon, size: iconSize, shadow: true))),
         ),
       );
 }
@@ -331,7 +332,7 @@ class _IconBtn extends StatelessWidget {
 class _Round extends StatelessWidget {
   const _Round({required this.size, required this.icon, required this.onTap, this.spinner = false});
   final double size;
-  final IconData icon;
+  final String icon;
   final VoidCallback onTap;
   final bool spinner;
   @override
@@ -342,7 +343,7 @@ class _Round extends StatelessWidget {
         height: size,
         alignment: Alignment.center,
         onTap: onTap,
-        child: spinner ? SizedBox(width: size * 0.42, height: size * 0.42, child: const CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : Icon(icon, size: size * 0.62, color: Colors.white),
+        child: spinner ? SizedBox(width: size * 0.42, height: size * 0.42, child: const CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : VIcon(icon, size: size * 0.74),
       );
 }
 
@@ -424,7 +425,7 @@ class _SkipLayer extends StatelessWidget {
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Text(target == SkipKind.intro ? 'Skip Intro' : 'Skip Outro', style: poppins(size: fs, weight: FontWeight.w600, color: Colors.black)),
                   SizedBox(width: fs * 0.4),
-                  Icon(Icons.forward_10_rounded, size: fs * 1.5, color: Colors.black),
+                  VIcon('seek_forward_10', size: fs * 1.5, color: Colors.black),
                 ]),
               ),
             ),
@@ -592,7 +593,7 @@ class _Menu extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(6, 2, 6, 8),
               child: Row(children: [
-                if (view != 'main') GestureDetector(onTap: () => m.setMenuView('main'), child: Padding(padding: const EdgeInsets.only(right: 8), child: Icon(Icons.arrow_back_rounded, size: fs + 6, color: Colors.white))),
+                if (view != 'main') GestureDetector(onTap: () => m.setMenuView('main'), child: Padding(padding: const EdgeInsets.only(right: 8), child: VIcon('chevron_left', size: fs + 10))),
                 Expanded(child: Text(title, style: poppins(size: fs + 1.5, weight: FontWeight.w600))),
               ]),
             ),
@@ -633,7 +634,7 @@ class _MenuRow extends StatelessWidget {
               child: Row(children: [
                 Expanded(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: poppins(size: fs, weight: FontWeight.w500))),
                 if (value.isNotEmpty) Flexible(child: Padding(padding: const EdgeInsets.only(left: 8), child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: poppins(size: fs - 1, color: C.w(0.65))))),
-                if (chevron) Icon(Icons.chevron_right_rounded, size: fs + 4, color: C.w(0.45)),
+                if (chevron) VIcon('chevron_right', size: fs + 6, color: C.w(0.45)),
               ]),
             ),
           ),
@@ -660,7 +661,7 @@ class _MenuOpt extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Expanded(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: poppins(size: fs, weight: selected ? FontWeight.w700 : FontWeight.w500))),
-                if (selected) Icon(Icons.check_rounded, size: fs + 4, color: Colors.white),
+                if (selected) VIcon('check', size: fs + 6),
               ]),
               if (hint != null) Padding(padding: const EdgeInsets.only(top: 3), child: Text(hint!, style: poppins(size: fs - 2.5, color: C.w(0.5)))),
             ]),

@@ -45,6 +45,19 @@ Email and password work right away. For Google and Discord, add this to **Supaba
 io.anibiar.app://login-callback
 ```
 
+## Adding your Upstash Redis (optional, makes episodes load faster)
+
+The app already works without it (it keeps its own copy on the phone). To add Upstash as a shared cache:
+
+1. Open the repo on GitHub: **Settings > Secrets and variables > Actions > Repository secrets > New repository secret**.
+   (Use *Repository secrets*, not *Environments*.)
+2. Add `UPSTASH_REDIS_REST_URL` (looks like `https://xxxx.upstash.io`) and `UPSTASH_REDIS_REST_TOKEN`.
+   Use a **separate** Upstash database for the app, or at least a token that can only touch app keys.
+3. If your streaming API is not `https://anibiartv-api.vercel.app`, also add a secret named `ANIVEXA_URL`.
+4. Go to **Actions > Build APK > Run workflow**. When it finishes, install the new APK from Releases.
+
+A key inside an APK can be extracted by anyone who has the file, so never put a token with write access to data you care about in it.
+
 ## Build it yourself
 
 ```bash

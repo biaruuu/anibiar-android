@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -5,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/config.dart';
+import 'cache.dart';
 
 /* ------------------------------------------------------------------------------------------
  * Everything here talks straight to the services the website uses, no website API in between:
@@ -46,6 +48,18 @@ class WatchEpisode {
 
   /// Providers that have this episode, in priority order.
   final List<String> providers;
+
+  Map<String, dynamic> toJson() => {'n': number, 't': title, 'd': description, 'i': image, 'a': airDate, 'u': duration, 'f': filler, 'p': providers};
+  factory WatchEpisode.fromJson(Map j) => WatchEpisode(
+        number: (j['n'] as num).toInt(),
+        title: j['t'] as String,
+        description: j['d'] as String?,
+        image: j['i'] as String?,
+        airDate: j['a'] as String?,
+        duration: (j['u'] as num?)?.toInt(),
+        filler: j['f'] == true,
+        providers: ((j['p'] as List?) ?? const []).cast<String>().toList(),
+      );
 }
 
 class EpisodesPayload {
@@ -53,6 +67,13 @@ class EpisodesPayload {
   final String? title;
   final List<WatchEpisode> sub;
   final List<WatchEpisode> dub;
+
+  Map<String, dynamic> toJson() => {'title': title, 'sub': sub.map((e) => e.toJson()).toList(), 'dub': dub.map((e) => e.toJson()).toList()};
+  factory EpisodesPayload.fromJson(Map j) => EpisodesPayload(
+        title: j['title'] as String?,
+        sub: ((j['sub'] as List?) ?? const []).map((e) => WatchEpisode.fromJson(e as Map)).toList(),
+        dub: ((j['dub'] as List?) ?? const []).map((e) => WatchEpisode.fromJson(e as Map)).toList(),
+      );
 }
 
 class StreamSubtitle {
@@ -176,14 +197,90 @@ class SiteApi {
 
   final Map<int, ({DateTime at, EpisodesPayload data})> _eps = {};
   final Map<int, Future<EpisodesPayload>> _epsInflight = {};
+  final Map<int, List<void Function(EpisodesPayload)>> _epsListeners = {};
 
-  Future<EpisodesPayload> episodes(int animeId, {bool force = false}) {
+  /// Episodes of an anime. Every provider is asked at the same time and the first answer is returned straight away;
+  /// slower providers are merged in later and delivered through [onUpdate]. A copy saved on the phone (or in Upstash)
+  /// is returned instantly and refreshed quietly in the background.
+  Future<EpisodesPayload> episodes(int animeId, {bool force = false, void Function(EpisodesPayload)? onUpdate}) async {
+    if (onUpdate != null) (_epsListeners[animeId] ??= []).add(onUpdate);
     final hit = _eps[animeId];
-    if (!force && hit != null && DateTime.now().difference(hit.at).inMinutes < 10) return Future.value(hit.data);
-    return _epsInflight[animeId] ??= _fetchEpisodes(animeId).then((d) {
-      _eps[animeId] = (at: DateTime.now(), data: d);
-      return d;
-    }).whenComplete(() => _epsInflight.remove(animeId));
+    if (!force && hit != null && DateTime.now().difference(hit.at).inMinutes < 10) return hit.data;
+    if (!force) {
+      final cached = await AppCache.instance.read('ep:$animeId');
+      if (cached != null && cached.data is Map) {
+        try {
+          final data = EpisodesPayload.fromJson(cached.data as Map);
+          if (data.sub.isNotEmpty || data.dub.isNotEmpty) {
+            _eps[animeId] = (at: cached.at, data: data);
+            if (DateTime.now().difference(cached.at).inMinutes >= 10) _refresh(animeId, quiet: true).catchError((_) => data);
+            return data;
+          }
+        } catch (_) {}
+      }
+    }
+    return _refresh(animeId, quiet: false);
+  }
+
+  Future<EpisodesPayload> _refresh(int id, {required bool quiet}) {
+    return _epsInflight[id] ??= _runEpisodes(id, quiet).whenComplete(() => _epsInflight.remove(id));
+  }
+
+  EpisodesPayload? _build(List<String> order, Map<String, dynamic> data) {
+    final sub = _merge(order, data, 'sub');
+    final dub = _merge(order, data, 'dub');
+    if (sub.isEmpty && dub.isEmpty) return null;
+    String? title;
+    for (final p in order) {
+      final m = data[p];
+      final t = m is Map ? _str((m['meta'] as Map?)?['title']) : null;
+      if (t != null) {
+        title = t;
+        break;
+      }
+    }
+    return EpisodesPayload(title: title, sub: sub, dub: dub);
+  }
+
+  Future<EpisodesPayload> _runEpisodes(int id, bool quiet) {
+    final order = AppConfig.providers;
+    final found = <String, dynamic>{};
+    final done = Completer<EpisodesPayload>();
+    var pending = order.length;
+    var failures = 0;
+
+    void deliver(EpisodesPayload p) {
+      _eps[id] = (at: DateTime.now(), data: p);
+      AppCache.instance.write('ep:$id', p.toJson());
+      for (final f in List.of(_epsListeners[id] ?? const [])) {
+        f(p);
+      }
+    }
+
+    for (final provider in order) {
+      _get('$_base/episodes/$provider/$id?map=false', timeout: const Duration(seconds: 25)).then((raw) {
+        if (raw is Map && raw[provider] is Map) found[provider] = raw[provider];
+        final p = _build(order, found);
+        if (p == null) return;
+        if (!done.isCompleted) done.complete(p);
+        if (!quiet && pending > 1) deliver(p);
+      }).catchError((_) {
+        failures++;
+      }).whenComplete(() {
+        pending--;
+        if (pending > 0) return;
+        final p = _build(order, found);
+        if (p != null) {
+          deliver(p);
+          if (!done.isCompleted) done.complete(p);
+        } else if (!done.isCompleted) {
+          done.completeError(ApiException(failures >= order.length
+              ? 'Could not reach the streaming server. Check your connection and try again.'
+              : 'No server has this anime yet. Try again later.'));
+        }
+      });
+    }
+    return done.future;
   }
 
   List<WatchEpisode> _merge(List<String> order, Map<String, dynamic> data, String audio) {
@@ -221,58 +318,59 @@ class SiteApi {
     return byNumber.values.toList()..sort((a, b) => a.number.compareTo(b.number));
   }
 
-  Future<EpisodesPayload> _fetchEpisodes(int id) async {
-    final order = AppConfig.providers;
-    final data = await _get('$_base/episodes/${order.join('/')}/$id?map=false', timeout: const Duration(seconds: 58)) as Map<String, dynamic>;
-    final sub = _merge(order, data, 'sub');
-    final dub = _merge(order, data, 'dub');
-    if (sub.isEmpty && dub.isEmpty) throw ApiException('No server has this anime yet. Try again later.');
-    String? title;
-    for (final p in order) {
-      final m = data[p];
-      final t = m is Map ? _str((m['meta'] as Map?)?['title']) : null;
-      if (t != null) {
-        title = t;
-        break;
-      }
-    }
-    return EpisodesPayload(title: title, sub: sub, dub: dub);
-  }
-
   /* ----------------------------------- streams ----------------------------------- */
 
   final Map<String, ({DateTime at, WatchPayload data})> _watch = {};
 
-  Future<WatchPayload> watch(int animeId, {required bool dub, required int episode, List<String> providers = const []}) async {
+  /// Streams for one episode. Providers are asked at the same time; the first one with a playable stream is
+  /// returned right away and the others are added through [onMore] (so playback starts as early as possible).
+  Future<WatchPayload> watch(int animeId, {required bool dub, required int episode, List<String> providers = const [], void Function(WatchPayload)? onMore}) {
     final key = '$animeId:${dub ? 'dub' : 'sub'}:$episode:${providers.join(',')}';
     final hit = _watch[key];
     // stream links expire quickly, so they are only reused for a minute and a half
-    if (hit != null && DateTime.now().difference(hit.at).inSeconds < 90) return hit.data;
+    if (hit != null && DateTime.now().difference(hit.at).inSeconds < 90) return Future.value(hit.data);
     final audio = dub ? 'dub' : 'sub';
     final order = AppConfig.providers.where((p) => providers.isEmpty || providers.contains(p)).toList();
-    if (order.isEmpty) throw ApiException('No server has this episode.');
+    if (order.isEmpty) return Future.error(ApiException('No server has this episode.'));
     final taken = <String>{};
-    final results = await Future.wait(order.map((provider) async {
-      try {
-        final raw = await _get('$_base/watch/$provider/$animeId/$audio/$provider-$episode', timeout: const Duration(seconds: 40));
-        return _parseWatch(provider, dub, raw as Map<String, dynamic>, taken);
-      } catch (_) {
-        return null;
+    final results = <String, ({List<StreamSource> streams, Range? intro, Range? outro})>{};
+    final done = Completer<WatchPayload>();
+    var pending = order.length;
+
+    WatchPayload build() {
+      final streams = <StreamSource>[];
+      Range? intro;
+      Range? outro;
+      for (final p in order) {
+        final r = results[p];
+        if (r == null) continue;
+        streams.addAll(r.streams);
+        intro ??= r.intro;
+        outro ??= r.outro;
       }
-    }));
-    final streams = <StreamSource>[];
-    Range? intro;
-    Range? outro;
-    for (final r in results) {
-      if (r == null) continue;
-      streams.addAll(r.streams);
-      intro ??= r.intro;
-      outro ??= r.outro;
+      return WatchPayload(streams: streams, intro: intro, outro: outro);
     }
-    if (streams.isEmpty) throw ApiException('No playable stream was found for this episode. Try another episode or try again later.');
-    final payload = WatchPayload(streams: streams, intro: intro, outro: outro);
-    _watch[key] = (at: DateTime.now(), data: payload);
-    return payload;
+
+    for (final provider in order) {
+      _get('$_base/watch/$provider/$animeId/$audio/$provider-$episode', timeout: const Duration(seconds: 25)).then((raw) {
+        final r = _parseWatch(provider, dub, raw as Map<String, dynamic>, taken);
+        if (r.streams.isEmpty) return;
+        results[provider] = r;
+        final p = build();
+        _watch[key] = (at: DateTime.now(), data: p);
+        if (!done.isCompleted) {
+          done.complete(p);
+        } else {
+          onMore?.call(p);
+        }
+      }).catchError((_) {}).whenComplete(() {
+        pending--;
+        if (pending == 0 && !done.isCompleted) {
+          done.completeError(ApiException('No playable stream was found for this episode. Try another episode or try again later.'));
+        }
+      });
+    }
+    return done.future;
   }
 
   bool _isThumbs(Map t) => RegExp(r'thumbnail|storyboard|sprite|preview', caseSensitive: false).hasMatch('${t['url'] ?? t['src'] ?? t['file'] ?? ''} ${t['label'] ?? ''}');

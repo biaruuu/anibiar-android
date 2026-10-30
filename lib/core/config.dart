@@ -7,6 +7,11 @@ class AppConfig {
   /// The streaming API the website uses (Anivexa). The app talks to it directly, no website in between.
   static const anivexaUrl = String.fromEnvironment('ANIVEXA_URL', defaultValue: 'https://anibiartv-api.vercel.app');
 
+  /// Optional Upstash Redis cache (shared, fast). Leave empty to run without it. Set from the GitHub secrets
+  /// UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN, see the README.
+  static const upstashUrl = String.fromEnvironment('UPSTASH_REDIS_REST_URL');
+  static const upstashToken = String.fromEnvironment('UPSTASH_REDIS_REST_TOKEN');
+
   /// Providers to ask, in priority order.
   static const providers = ['anikoto', 'aniwaves', 'animegg'];
 

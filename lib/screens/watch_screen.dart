@@ -97,7 +97,10 @@ class _WatchScreenState extends State<WatchScreen> {
       _epsError = null;
     });
     try {
-      final e = await SiteApi.instance.episodes(widget.id, force: force);
+      final e = await SiteApi.instance.episodes(widget.id, force: force, onUpdate: (more) {
+        // slower providers (or a fresh copy) arrive after the first answer
+        if (mounted && _eps != null) setState(() => _eps = more);
+      });
       if (!mounted) return;
       // Fall back to a sensible audio and episode when the requested ones don't exist.
       if (_dub && e.dub.isEmpty) _dub = false;
@@ -142,7 +145,10 @@ class _WatchScreenState extends State<WatchScreen> {
       _backup = null;
     });
     try {
-      final w = await SiteApi.instance.watch(widget.id, dub: _dub, episode: ep.number, providers: ep.providers);
+      final w = await SiteApi.instance.watch(widget.id, dub: _dub, episode: ep.number, providers: ep.providers, onMore: (more) {
+        // extra servers that answered later; the one that is playing stays selected
+        if (mounted && gen == _watchGen) setState(() => _watch = more);
+      });
       if (!mounted || gen != _watchGen) return;
       if (w.streams.isEmpty) throw ApiException('No stream is available for this episode right now.');
       setState(() => _watch = w);
@@ -190,6 +196,7 @@ class _WatchScreenState extends State<WatchScreen> {
   Future<void> _openStream({required bool resume}) async {
     final s = _stream;
     if (s == null) return;
+    _serverName = s.name;
     final k = _skipData();
     double start = 0;
     if (resume) {
