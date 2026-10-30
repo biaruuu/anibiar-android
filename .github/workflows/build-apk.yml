@@ -2,11 +2,12 @@ name: Build APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, kotlin]
   workflow_dispatch:
 
 permissions:
   contents: write
+  checks: write
 
 jobs:
   build:
@@ -19,20 +20,12 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: subosito/flutter-action@v2
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          channel: stable
-          cache: true
-
-      - name: Generate the Android project
-        run: bash tool/setup_android.sh
-
-      - run: flutter pub get
-
-      - name: Analyze (errors fail the build; hints and warnings do not)
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+          gradle-version: "8.10.2"
 
       - name: Build the APK
+        id: build
         env:
           SITE_URL: ${{ vars.SITE_URL }}
           ANIVEXA_URL: ${{ secrets.ANIVEXA_URL || vars.ANIVEXA_URL }}
@@ -40,22 +33,30 @@ jobs:
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
           TMDB_KEY: ${{ secrets.TMDB_KEY }}
         run: |
-          EXTRA=()
-          for NAME in SITE_URL ANIVEXA_URL UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN TMDB_KEY; do
-            if [ -n "${!NAME:-}" ]; then EXTRA+=("--dart-define=${NAME}=${!NAME}"); fi
-          done
-          flutter build apk --release "${EXTRA[@]}"
+          set -o pipefail
+          gradle assembleRelease --console=plain --no-daemon 2>&1 | tee build.log
+
+      - name: Show the compile errors (so they can be read quickly)
+        if: failure()
+        run: |
+          {
+            grep -E "^e: |error:|What went wrong|Execution failed|Could not " build.log | head -60 || true
+          } > errors.txt
+          cat errors.txt
+          msg=$(sed -e 's/%/%25/g' -e 's/\r//g' errors.txt | awk '{printf "%s%%0A", $0}' | cut -c1-60000)
+          echo "::error title=Kotlin build errors::${msg}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: AniBiar-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: app/build/outputs/apk/release/app-release.apk
 
-      - name: Publish to Releases (always the newest build)
+      - name: Publish to Releases (always the newest build of main)
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: AniBiar (latest build)
           body: Newest APK built from the main branch. Download app-release.apk and install it on your phone.
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: app/build/outputs/apk/release/app-release.apk
           prerelease: true
