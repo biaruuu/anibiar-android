@@ -53,8 +53,9 @@ The app already works without it (it keeps its own copy on the phone). To add Up
    (Use *Repository secrets*, not *Environments*.)
 2. Add `UPSTASH_REDIS_REST_URL` (looks like `https://xxxx.upstash.io`) and `UPSTASH_REDIS_REST_TOKEN`.
    Use a **separate** Upstash database for the app, or at least a token that can only touch app keys.
-3. If your streaming API is not `https://anibiartv-api.vercel.app`, also add a secret named `ANIVEXA_URL`.
-4. Go to **Actions > Build APK > Run workflow**. When it finishes, install the new APK from Releases.
+3. For the title logos and artwork (same as the website) add `TMDB_KEY` with your free TMDB API key (the v3 key, same one as in Vercel).
+4. If your streaming API is not `https://anibiartv-api.vercel.app`, also add a secret named `ANIVEXA_URL`.
+5. Go to **Actions > Build APK > Run workflow**. When it finishes, install the new APK from Releases.
 
 A key inside an APK can be extracted by anyone who has the file, so never put a token with write access to data you care about in it.
 

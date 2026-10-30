@@ -38,9 +38,10 @@ jobs:
           ANIVEXA_URL: ${{ secrets.ANIVEXA_URL || vars.ANIVEXA_URL }}
           UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          TMDB_KEY: ${{ secrets.TMDB_KEY }}
         run: |
           EXTRA=()
-          for NAME in SITE_URL ANIVEXA_URL UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN; do
+          for NAME in SITE_URL ANIVEXA_URL UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN TMDB_KEY; do
             if [ -n "${!NAME:-}" ]; then EXTRA+=("--dart-define=${NAME}=${!NAME}"); fi
           done
           flutter build apk --release "${EXTRA[@]}"

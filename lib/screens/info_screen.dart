@@ -7,6 +7,7 @@ import '../core/theme.dart';
 import '../services/anilist.dart';
 import '../services/auth.dart';
 import '../services/library.dart';
+import '../services/tmdb.dart';
 import '../widgets/cards.dart';
 import '../widgets/glass.dart';
 
@@ -219,6 +220,7 @@ class _InfoScreenState extends State<InfoScreen> {
                   onTap: () => launchUrl(Uri.parse('https://www.youtube.com/watch?v=${d.trailerId}'), mode: LaunchMode.externalApplication),
                 ),
               ],
+              _Gallery(anime: a),
               if (d.relations.isNotEmpty) ...[
                 const SizedBox(height: 26),
                 const SectionTitle('Seasons & Related'),
@@ -236,6 +238,105 @@ class _InfoScreenState extends State<InfoScreen> {
         const SizedBox(height: 40),
       ]),
     );
+  }
+}
+
+/// "Artwork & Posters": the banner and poster from AniList plus backgrounds, posters and logos from TMDB.
+class _Gallery extends StatefulWidget {
+  const _Gallery({required this.anime});
+  final Anime anime;
+  @override
+  State<_Gallery> createState() => _GalleryState();
+}
+
+class _GalleryState extends State<_Gallery> {
+  List<Artwork> _extra = const [];
+  String _filter = 'All';
+  bool _open = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final a = widget.anime;
+    Tmdb.instance.artwork(a.title.english ?? a.title.romaji ?? a.name, a.format == 'MOVIE').then((l) {
+      if (mounted) setState(() => _extra = l);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final a = widget.anime;
+    final images = <Artwork>[
+      if (a.banner != null) Artwork('Banners', a.banner!),
+      if (a.poster != null) Artwork('Posters', a.poster!),
+      ..._extra,
+    ];
+    if (images.length < 2) return const SizedBox();
+    const order = ['Backgrounds', 'Banners', 'Posters', 'Logos'];
+    final kinds = [for (final k in order) if (images.any((i) => i.kind == k)) k];
+    if (!kinds.contains(_filter)) _filter = 'All';
+    final all = _filter == 'All' ? images : images.where((i) => i.kind == _filter).toList();
+    final list = all.take(80).toList();
+    final width = MediaQuery.of(context).size.width - 32;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 26),
+      const SectionTitle('Artwork & Posters'),
+      const SizedBox(height: 4),
+      Text('${all.length} images', style: TextStyle(fontSize: 12.5, color: C.w(0.55))),
+      const SizedBox(height: 12),
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: [
+          for (final k in ['All', ...kinds])
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Glass(
+                kind: _filter == k ? GlassKind.white : GlassKind.btn,
+                radius: 999,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                onTap: () => setState(() => _filter = k),
+                child: Text(k, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: _filter == k ? Colors.black : Colors.white)),
+              ),
+            ),
+        ]),
+      ),
+      const SizedBox(height: 12),
+      if (_open)
+        GridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: 2,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 1.45,
+          children: [
+            for (final i in list)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: ColoredBox(
+                  color: C.w(0.05),
+                  child: CachedNetworkImage(imageUrl: i.url, fit: i.kind == 'Logos' ? BoxFit.contain : BoxFit.cover, memCacheWidth: 500, errorWidget: (_, __, ___) => const SizedBox()),
+                ),
+              ),
+          ],
+        )
+      else if (list.isNotEmpty)
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            width: width,
+            height: width * 0.56,
+            child: CachedNetworkImage(imageUrl: list.first.url, fit: list.first.kind == 'Logos' ? BoxFit.contain : BoxFit.cover, memCacheWidth: 800, errorWidget: (_, __, ___) => const SizedBox()),
+          ),
+        ),
+      if (list.length > 1)
+        Center(
+          child: TextButton(
+            onPressed: () => setState(() => _open = !_open),
+            child: Text(_open ? 'Show less' : 'View all ${all.length} images', style: TextStyle(color: C.w(0.65))),
+          ),
+        ),
+    ]);
   }
 }
 

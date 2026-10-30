@@ -12,6 +12,9 @@ class AppConfig {
   static const upstashUrl = String.fromEnvironment('UPSTASH_REDIS_REST_URL');
   static const upstashToken = String.fromEnvironment('UPSTASH_REDIS_REST_TOKEN');
 
+  /// Free TMDB key (themoviedb.org > Settings > API) for the title logos and artwork. Optional.
+  static const tmdbKey = String.fromEnvironment('TMDB_KEY');
+
   /// Providers to ask, in priority order.
   static const providers = ['anikoto', 'aniwaves', 'animegg'];
 

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../core/nav.dart';
 import '../core/theme.dart';
 import '../services/anilist.dart';
+import '../services/tmdb.dart';
 import '../services/api.dart';
 import '../services/auth.dart';
 import '../services/library.dart';
@@ -164,7 +165,7 @@ class _Hero extends StatelessWidget {
           right: 16,
           bottom: 20,
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(a.name, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 28, height: 1.1, fontWeight: FontWeight.w800, letterSpacing: -0.5, color: Colors.white, shadows: [Shadow(blurRadius: 10, color: Color(0x99000000))])),
+            _TitleLogo(anime: a),
             const SizedBox(height: 12),
             Wrap(spacing: 8, runSpacing: 8, children: [
               for (final c in chips)
@@ -207,6 +208,61 @@ class _Hero extends StatelessWidget {
           ]),
         ),
       ]),
+    );
+  }
+}
+
+/// The stylised title logo from TMDB (like the website's hero); the plain title until it arrives or when there is none.
+class _TitleLogo extends StatefulWidget {
+  const _TitleLogo({required this.anime});
+  final Anime anime;
+  @override
+  State<_TitleLogo> createState() => _TitleLogoState();
+}
+
+class _TitleLogoState extends State<_TitleLogo> {
+  String? _url;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TitleLogo old) {
+    super.didUpdateWidget(old);
+    if (old.anime.id != widget.anime.id) {
+      _url = null;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final a = widget.anime;
+    final url = await Tmdb.instance.logo(a.title.english ?? a.title.romaji ?? a.name, a.format == 'MOVIE');
+    if (mounted && a.id == widget.anime.id && url != null) setState(() => _url = url);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = _url;
+    if (url == null) {
+      return Text(widget.anime.name, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 28, height: 1.1, fontWeight: FontWeight.w800, letterSpacing: -0.5, color: Colors.white, shadows: [Shadow(blurRadius: 10, color: Color(0x99000000))]));
+    }
+    final w = MediaQuery.of(context).size.width;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: 96, maxWidth: w * 0.85),
+        child: CachedNetworkImage(
+          imageUrl: url,
+          fit: BoxFit.contain,
+          alignment: Alignment.centerLeft,
+          fadeInDuration: const Duration(milliseconds: 250),
+          errorWidget: (_, __, ___) => Text(widget.anime.name, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 28, height: 1.1, fontWeight: FontWeight.w800, color: Colors.white)),
+        ),
+      ),
     );
   }
 }
