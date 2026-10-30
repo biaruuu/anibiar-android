@@ -1,90 +1,37 @@
-# AniBiar for Android
+# AniBiar (Android, Kotlin)
 
-The AniBiar TV website as a native Android app, written in Dart with Flutter.
+The AniBiar TV website as a native Android app: Kotlin, Jetpack Compose and the Media3 (ExoPlayer) video player.
+It talks to the same services as the website: AniList, the Anivexa streaming API, AniSkip, TMDB and your Supabase project
+(accounts, watch history, favorites, watchlist, avatar decorations).
 
-It uses the same data as the website:
+## Get the app
 
-| What | Where it comes from |
+Every push to `main` builds an APK. Open **Releases > AniBiar (latest build)** and download `app-release.apk`.
+Builds are signed with one fixed key, so a new build installs over the old one. (If you still have the old Flutter
+version installed, uninstall it once: it was signed with a different key.)
+
+## Settings (GitHub secrets)
+
+Repo **Settings > Secrets and variables > Actions > Repository secrets > New repository secret**. All are optional:
+
+| Name | What it does |
 | --- | --- |
-| Anime lists, search, details | AniList (through your site's cached `/api/anilist`, falling back to AniList) |
-| Episodes, streams, subtitles, skip times | Your site's `/api/anime/:id/episodes`, `/api/anime/:id/watch`, `/api/skip` |
-| Accounts, profile, History, Favorites, Watchlist | The same Supabase project (`profiles`, `watch_history`, `favorites`, `my_list`, `avatar_decorations`, `profiles` storage bucket) |
-| Avatar decorations | `/api/decorations` (sprite sheets played frame by frame) |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | shared cache for episode lists (faster) |
+| `TMDB_KEY` | title logos and the artwork gallery |
+| `ANIVEXA_URL` | only if your streaming API is not `https://anibiartv-api.vercel.app` |
 
-So a show you watch on the website shows up under Continue Watching in the app, and the other way round.
+A key inside an APK can be extracted by anyone who has the file: use a separate Upstash database for the app.
+After adding secrets, run **Actions > Build APK > Run workflow**.
 
-## Look and feel
+Google / Discord login needs `io.anibiar.app://login-callback` in Supabase > Authentication > URL Configuration > Redirect URLs.
 
-Discord "Onyx" dark theme with the same liquid-glass style as the website: floating glass bottom bar
-(Home, Search, Profile, Settings), glass buttons, glass Sub/Dub switch and glass panels.
+## Connection report
 
-## Video player
-
-A custom player on top of ExoPlayer: tap to show or hide controls, double-tap left/right to go back or forward 10 s,
-double-tap the middle for fullscreen, seek bar, speed, HLS quality levels, soft-subtitle tracks drawn in Poppins with an outline,
-Skip Intro / Skip Outro (with auto skip and undo), autoplay, auto next episode, resume where you left off, and automatic fallback to the next server.
-
-## Get the APK
-
-Every push to `main` builds the app on GitHub Actions. Open **Releases > AniBiar (latest build)** and download `app-release.apk`,
-or open the **Actions** tab and download the `AniBiar-apk` artifact.
-
-### Point it at your site
-
-The app needs your deployed website address (the one that has `ANIVEXA_API_URL` set, because that is what serves episodes and streams).
-The default is `https://anibiartv.vercel.app`. To change it:
-
-* GitHub: **Settings > Secrets and variables > Actions > Variables > New repository variable**, name `SITE_URL`, value `https://your-site.vercel.app`.
-* Local builds: `flutter run --dart-define=SITE_URL=https://your-site.vercel.app`
-
-### Google / Discord sign-in
-
-Email and password work right away. For Google and Discord, add this to **Supabase > Authentication > URL Configuration > Redirect URLs**:
-
-```
-io.anibiar.app://login-callback
-```
-
-## Adding your Upstash Redis (optional, makes episodes load faster)
-
-The app already works without it (it keeps its own copy on the phone). To add Upstash as a shared cache:
-
-1. Open the repo on GitHub: **Settings > Secrets and variables > Actions > Repository secrets > New repository secret**.
-   (Use *Repository secrets*, not *Environments*.)
-2. Add `UPSTASH_REDIS_REST_URL` (looks like `https://xxxx.upstash.io`) and `UPSTASH_REDIS_REST_TOKEN`.
-   Use a **separate** Upstash database for the app, or at least a token that can only touch app keys.
-3. For the title logos and artwork (same as the website) add `TMDB_KEY` with your free TMDB API key (the v3 key, same one as in Vercel).
-4. If your streaming API is not `https://anibiartv-api.vercel.app`, also add a secret named `ANIVEXA_URL`.
-5. Go to **Actions > Build APK > Run workflow**. When it finishes, install the new APK from Releases.
-
-A key inside an APK can be extracted by anyone who has the file, so never put a token with write access to data you care about in it.
+Settings > Connection report runs a quick test of AniList, your site and the streaming API with timings and lists the
+latest network calls, so a failure can be read instead of guessed.
 
 ## Build it yourself
 
 ```bash
-git clone https://github.com/biaruuu/anibiar-android.git
-cd anibiar-android
-bash tool/setup_android.sh      # generates the android/ folder and applies the manifest + icons
-flutter pub get
-flutter run                     # or: flutter build apk --release
+gradle assembleRelease      # JDK 17 and the Android SDK; the APK is app/build/outputs/apk/release/
 ```
-
-Needs Flutter (stable) and the Android SDK.
-
-## Project layout
-
-```
-lib/
-  main.dart                 app start (Supabase + auth)
-  core/                     config, theme (Onyx colours), navigation helpers
-  services/                 anilist.dart, api.dart (your site), auth.dart, library.dart (Supabase + local)
-  player/                   player_model.dart (logic), player_view.dart (controls + menus)
-  widgets/                  glass.dart (glass buttons, switch, panels), cards, avatar + decorations
-  screens/                  shell (glass nav), home, search, info, watch, profile, settings, login
-android_overlay/            AndroidManifest.xml and launcher icons applied by tool/setup_android.sh
-```
-
-## Not in the app yet
-
-* The profile "Share" picture / Live photo maker (it needs the canvas video encoder from the website).
-* Desktop and tablet layouts: this is a phone app.
