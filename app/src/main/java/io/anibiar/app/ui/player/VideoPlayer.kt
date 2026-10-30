@@ -345,7 +345,7 @@ private fun TimeText(state: PlayerState, title: String, w: Float, modifier: Modi
         color = Color.White,
         fontSize = cl(12f, w * 0.018f, 16f).sp,
         fontWeight = FontWeight.Medium,
-        fontFeatureSettings = "tnum",
+        style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )

@@ -300,9 +300,10 @@ private fun ContinueWatching(items: List<HistoryItem>?, onChanged: () -> Unit) {
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             itemsIndexed(list, key = { _, h -> h.animeId }) { _, h ->
                 HistoryCard(
-                    h, Modifier.width(cardW),
+                    h,
                     onClick = { Nav.openWatch(h.animeId, h.episode, h.dub) },
                     onRemove = { scope.launch { Library.removeHistory(h.animeId); onChanged() } },
+                    modifier = Modifier.width(cardW),
                 )
             }
         }
