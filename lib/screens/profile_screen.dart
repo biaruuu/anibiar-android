@@ -187,7 +187,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: posterGrid(),
+      gridDelegate: posterGrid(context),
       itemCount: items.length,
       itemBuilder: (context, i) {
         final it = items[i];

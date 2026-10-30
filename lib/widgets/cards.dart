@@ -62,8 +62,8 @@ class EpisodeCard extends StatelessWidget {
               right: 0,
               bottom: 0,
               child: Container(
-                padding: const EdgeInsets.fromLTRB(8, 28, 8, 7),
-                decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Color(0xCC000000), Color(0x00000000)])),
+                padding: const EdgeInsets.fromLTRB(8, 5, 8, 5),
+                color: const Color(0xA6000000),
                 child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                   Text('EP ${item.episode}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
                   Text(timeAgo(item.airingAt), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
@@ -73,7 +73,7 @@ class EpisodeCard extends StatelessWidget {
           ]),
         ),
         const SizedBox(height: 8),
-        Wrap(spacing: 4, runSpacing: 4, children: [
+        ChipRow(children: [
           Chip2('${item.episode}', icon: Icons.closed_caption_outlined),
           Chip2(a.formatLabel),
           if (a.seasonYear != null) Chip2('${a.seasonYear}'),
@@ -109,7 +109,7 @@ class PosterTile extends StatelessWidget {
                   child: Padding(padding: const EdgeInsets.all(6), child: GlassIconButton(icon: Icons.close_rounded, size: 28, iconSize: 16, onTap: onRemove)),
                 ),
         ),
-        if (chips.isNotEmpty) ...[const SizedBox(height: 8), Wrap(spacing: 4, runSpacing: 4, children: chips)],
+        if (chips.isNotEmpty) ...[const SizedBox(height: 8), ChipRow(children: chips)],
         const SizedBox(height: 6),
         Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, height: 1.25, fontWeight: FontWeight.w600, color: Colors.white)),
       ]),
@@ -191,7 +191,7 @@ class Panel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         padding: padding,
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(radius), border: Border.all(color: C.w(0.2))),
+        decoration: BoxDecoration(color: C.surface, borderRadius: BorderRadius.circular(radius), border: Border.all(color: C.line)),
         child: child,
       );
 }
@@ -205,7 +205,7 @@ class ErrorBox extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         width: double.infinity,
         padding: const EdgeInsets.all(28),
-        decoration: BoxDecoration(color: C.w(0.05), borderRadius: BorderRadius.circular(18), border: Border.all(color: C.w(0.1))),
+        decoration: BoxDecoration(color: C.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: C.line)),
         child: Column(children: [
           const Icon(Icons.error_outline_rounded, size: 32, color: Color(0xFFF87171)),
           const SizedBox(height: 10),
@@ -223,7 +223,7 @@ class PosterGridSkeleton extends StatelessWidget {
   Widget build(BuildContext context) => GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 20, crossAxisSpacing: 10, childAspectRatio: 0.46),
+        gridDelegate: posterGrid(context),
         itemCount: count,
         itemBuilder: (_, __) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
           AspectRatio(aspectRatio: 2 / 3, child: Skel()),
@@ -235,5 +235,12 @@ class PosterGridSkeleton extends StatelessWidget {
       );
 }
 
-/// Poster grid used by Search / Profile: 3 columns like the phone layout of the website.
-SliverGridDelegate posterGrid() => const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 20, crossAxisSpacing: 10, childAspectRatio: 0.5);
+/// Poster grid that adapts to the screen: 3 columns on phones, more on wider screens. Each row is exactly as tall
+/// as its poster plus the chip line and a two line title, so nothing overflows whatever the width.
+SliverGridDelegate posterGrid(BuildContext context, {double sidePadding = 32}) {
+  final w = MediaQuery.of(context).size.width;
+  final cols = w < 520 ? 3 : (w < 780 ? 4 : (w < 1040 ? 5 : 6));
+  const gap = 10.0;
+  final colW = (w - sidePadding - gap * (cols - 1)) / cols;
+  return SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 16, crossAxisSpacing: gap, mainAxisExtent: colW * 1.5 + 76);
+}

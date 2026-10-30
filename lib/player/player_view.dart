@@ -148,12 +148,7 @@ class _PlayerViewState extends State<PlayerView> {
                 child: AnimatedOpacity(
                   opacity: hidden ? 0 : 1,
                   duration: const Duration(milliseconds: 250),
-                  child: const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x80000000), Color(0x00000000), Color(0x00000000), Color(0x99000000)], stops: [0, 0.28, 0.6, 1]),
-                    ),
-                    child: SizedBox.expand(),
-                  ),
+                  child: const ColoredBox(color: Color(0x59000000), child: SizedBox.expand()),
                 ),
               ),
               // ---------------- top bar: volume on the left, tools on the right ----------------

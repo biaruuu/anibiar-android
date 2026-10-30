@@ -194,6 +194,12 @@ String timeAgo(int unix) {
 
 String stripHtml(String s) => s.replaceAll(RegExp(r'<[^>]*>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
 
+/// A real answer from AniList (such as "not found"): retrying would not help.
+class _Definite implements Exception {
+  _Definite(this.message);
+  final String message;
+}
+
 class AniList {
   AniList._();
   static final AniList instance = AniList._();
@@ -205,7 +211,7 @@ class AniList {
   final List<Completer<void>> _waiting = [];
 
   Future<void> _acquire() async {
-    if (_active >= 3) {
+    if (_active >= 4) {
       final c = Completer<void>();
       _waiting.add(c);
       await c.future;
@@ -218,75 +224,68 @@ class AniList {
     if (_waiting.isNotEmpty) _waiting.removeAt(0).complete();
   }
 
-  Future<Map<String, dynamic>?> _viaSite(String body) async {
-    http.Response res;
-    try {
-      res = await http
-          .post(Uri.parse('${AppConfig.siteUrl}/api/anilist'), headers: {'Content-Type': 'application/json'}, body: body)
-              .timeout(const Duration(seconds: 8));
-    } catch (_) {
-      return null; // can't reach the site: ask AniList directly
-    }
-    dynamic json;
-    try {
-      json = jsonDecode(res.body);
-    } catch (_) {
-      return null;
-    }
+  /// Your site's cached copy of AniList (Redis). Usually the fastest door, and it works when AniList blocks this phone.
+  Future<Map<String, dynamic>> _viaSite(String body) async {
+    final res = await http
+        .post(Uri.parse('${AppConfig.siteUrl}/api/anilist'), headers: {'Content-Type': 'application/json'}, body: body)
+        .timeout(const Duration(seconds: 14));
+    final json = jsonDecode(res.body);
     if (res.statusCode == 200 && json is Map && json['data'] is Map) return Map<String, dynamic>.from(json['data'] as Map);
-    final errors = json is Map ? json['errors'] : null;
-    // A real answer such as "not found" (4xx other than 429): show it, don't retry elsewhere.
-    if (errors is List && errors.isNotEmpty && res.statusCode >= 400 && res.statusCode < 500 && res.statusCode != 429) {
-      throw Exception((errors.first as Map)['message'] ?? 'AniList error');
-    }
-    return null;
+    throw Exception('site ${res.statusCode}');
   }
 
-  /// AniList asked directly from the phone (with retries). Used when the site is slow or down.
+  /// AniList asked directly from the phone.
   Future<Map<String, dynamic>> _direct(String body) async {
-    Object last = Exception("Couldn't reach AniList. Check your connection and try again.");
-    for (var attempt = 0; attempt <= 1; attempt++) {
-      await _acquire();
-      http.Response? res;
-      try {
-        res = await http
-            .post(Uri.parse(_endpoint), headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: body)
-            .timeout(const Duration(seconds: 10));
-      } catch (_) {
-        last = Exception("Couldn't reach AniList. Check your connection and try again.");
-      } finally {
-        _release();
+    await _acquire();
+    try {
+      final res = await http
+          .post(Uri.parse(_endpoint), headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: body)
+          .timeout(const Duration(seconds: 14));
+      if (res.statusCode == 200) {
+        final json = jsonDecode(res.body) as Map<String, dynamic>;
+        final errors = json['errors'] as List?;
+        if (errors != null && errors.isNotEmpty) throw _Definite((errors.first as Map)['message'] ?? 'AniList error');
+        return Map<String, dynamic>.from(json['data'] as Map);
       }
-      if (res != null) {
-        if (res.statusCode == 200) {
-          final json = jsonDecode(res.body) as Map<String, dynamic>;
-          final errors = json['errors'] as List?;
-          if (errors != null && errors.isNotEmpty) throw Exception((errors.first as Map)['message'] ?? 'AniList error');
-          return Map<String, dynamic>.from(json['data'] as Map);
-        }
-        if (res.statusCode == 429 || res.statusCode >= 500) {
-          throw Exception(res.statusCode == 429 ? 'AniList is busy right now. Try again in a moment.' : 'AniList is having problems (${res.statusCode}).');
-        }
-        throw Exception('AniList error ${res.statusCode}');
-      }
-      if (attempt < 1) await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (res.statusCode == 404) throw _Definite('Not found.');
+      throw Exception(res.statusCode == 429 ? 'AniList is busy right now. Try again in a moment.' : 'AniList error ${res.statusCode}');
+    } finally {
+      _release();
     }
-    throw last;
   }
 
-  /// AniList is asked directly from the phone. Only if that fails (for example it is rate limiting this connection)
-  /// is the website's cached copy used as a backup.
+  /// Both doors are opened at the same moment and the first good answer wins, so a slow or blocked one never holds the screen.
+  /// A failed round is repeated once.
   Future<Map<String, dynamic>> _request(String body) async {
-    try {
-      return await _direct(body);
-    } catch (e) {
-      Map<String, dynamic>? backup;
+    Object? last;
+    for (var round = 0; round < 2; round++) {
+      final done = Completer<Map<String, dynamic>>();
+      var left = 2;
+      void fail(Object e) {
+        last = e;
+        if (e is _Definite && !done.isCompleted) {
+          done.completeError(e);
+          return;
+        }
+        if (--left == 0 && !done.isCompleted) done.completeError(e);
+      }
+
+      _viaSite(body).then((d) {
+        if (!done.isCompleted) done.complete(d);
+      }, onError: fail);
+      _direct(body).then((d) {
+        if (!done.isCompleted) done.complete(d);
+      }, onError: fail);
       try {
-        backup = await _viaSite(body);
-      } catch (_) {}
-      if (backup != null) return backup;
-      rethrow;
+        return await done.future;
+      } catch (e) {
+        last = e;
+        if (e is _Definite) break;
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+      }
     }
+    if (last is _Definite) throw Exception((last as _Definite).message);
+    throw Exception("Couldn't reach AniList. Check your connection and try again.");
   }
 
   /* ---- persistent cache: the last good answer is kept on the phone so the app opens instantly ---- */

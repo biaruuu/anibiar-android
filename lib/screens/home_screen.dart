@@ -82,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: EdgeInsets.zero,
         children: [
           Stack(children: [
-            _Hero(items: _trending, index: _hero, height: (h * 0.74).clamp(440.0, 640.0).toDouble(), onSelect: (i) => setState(() => _hero = i), onRetry: _refresh),
+            _Hero(items: _trending, index: _hero, height: (h * 0.64).clamp(400.0, 560.0).toDouble(), onSelect: (i) => setState(() => _hero = i), onRetry: _refresh),
             Positioned(
               top: top + 6,
               left: 16,
@@ -137,77 +137,78 @@ class _Hero extends StatelessWidget {
       if (a.seasonYear != null) '${a.seasonYear}',
       ...a.genres.take(2),
     ];
+    final w = MediaQuery.of(context).size.width;
+    final pad = w < 380 ? 14.0 : 18.0;
     return SizedBox(
       height: height,
-      child: Stack(fit: StackFit.expand, children: [
-        // artwork (only the current picture is loaded) fading into the page background at the bottom
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 600),
-          child: SizedBox.expand(
-            key: ValueKey(a.id),
-            child: CachedNetworkImage(
-              imageUrl: a.cover ?? a.banner ?? '',
-              fit: BoxFit.cover,
-              memCacheWidth: 900,
-              fadeInDuration: const Duration(milliseconds: 200),
-              placeholder: (_, __) => Container(color: C.w(0.04)),
-              errorWidget: (_, __, ___) => Container(color: C.w(0.04)),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
+        child: Stack(fit: StackFit.expand, children: [
+          // artwork (only the current picture is loaded) under one flat dark layer so the text always reads
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 500),
+            child: SizedBox.expand(
+              key: ValueKey(a.id),
+              child: CachedNetworkImage(
+                imageUrl: a.cover ?? a.banner ?? '',
+                fit: BoxFit.cover,
+                memCacheWidth: 900,
+                fadeInDuration: const Duration(milliseconds: 200),
+                placeholder: (_, __) => Container(color: C.surface),
+                errorWidget: (_, __, ___) => Container(color: C.surface),
+              ),
             ),
           ),
-        ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [C.k(0.45), C.k(0.25), C.k(0.55), Colors.black], stops: const [0, 0.35, 0.78, 1]),
-          ),
-        ),
-        Positioned(
-          left: 16,
-          right: 16,
-          bottom: 20,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _TitleLogo(anime: a),
-            const SizedBox(height: 12),
-            Wrap(spacing: 8, runSpacing: 8, children: [
-              for (final c in chips)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                  decoration: BoxDecoration(color: C.w(0.08), borderRadius: BorderRadius.circular(99), border: Border.all(color: C.w(0.15))),
-                  child: Text(c, style: TextStyle(fontSize: 12, color: C.w(0.9))),
-                ),
-            ]),
-            if (desc.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(desc, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, height: 1.45, color: C.w(0.7))),
-            ],
-            const SizedBox(height: 16),
-            Row(children: [
-              GlassButton(label: 'Watch Now', icon: Icons.play_arrow_rounded, kind: GlassKind.white, height: 42, radius: 10, onTap: () => openWatch(context, a.id, episode: 1)),
-              const SizedBox(width: 10),
-              GlassButton(label: 'Details', icon: Icons.info_outline_rounded, height: 42, radius: 10, onTap: () => openInfo(context, a.id)),
-              const SizedBox(width: 10),
-              _AddButton(anime: a),
-            ]),
-            if (list.length > 1) ...[
-              const SizedBox(height: 16),
-              Row(children: [
-                for (var i = 0; i < list.length; i++)
-                  GestureDetector(
-                    onTap: () => onSelect(i),
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 250),
-                        height: 6,
-                        width: i == index ? 24 : 6,
-                        decoration: BoxDecoration(color: i == index ? Colors.white : C.w(0.4), borderRadius: BorderRadius.circular(99)),
-                      ),
-                    ),
+          ColoredBox(color: C.k(0.55)),
+          Positioned(
+            left: pad,
+            right: pad,
+            bottom: 18,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _TitleLogo(anime: a),
+              const SizedBox(height: 10),
+              ChipRow(children: [
+                for (final c in chips)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: C.k(0.45), borderRadius: BorderRadius.circular(99), border: Border.all(color: C.line)),
+                    child: Text(c, style: TextStyle(fontSize: w < 380 ? 11 : 12, color: C.w(0.9))),
                   ),
               ]),
-            ],
-          ]),
-        ),
-      ]),
+              if (desc.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(desc, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: w < 380 ? 13 : 14, height: 1.45, color: C.w(0.78))),
+              ],
+              const SizedBox(height: 14),
+              Row(children: [
+                Expanded(flex: 5, child: GlassButton(label: 'Watch Now', icon: Icons.play_arrow_rounded, kind: GlassKind.white, height: 42, radius: 10, expand: true, padding: const EdgeInsets.symmetric(horizontal: 10), onTap: () => openWatch(context, a.id, episode: 1))),
+                const SizedBox(width: 8),
+                Expanded(flex: 4, child: GlassButton(label: 'Details', icon: Icons.info_outline_rounded, height: 42, radius: 10, expand: true, padding: const EdgeInsets.symmetric(horizontal: 10), onTap: () => openInfo(context, a.id))),
+                const SizedBox(width: 8),
+                _AddButton(anime: a),
+              ]),
+              if (list.length > 1) ...[
+                const SizedBox(height: 14),
+                Row(children: [
+                  for (var i = 0; i < list.length; i++)
+                    GestureDetector(
+                      onTap: () => onSelect(i),
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 250),
+                          height: 5,
+                          width: i == index ? 22 : 5,
+                          decoration: BoxDecoration(color: i == index ? Colors.white : C.w(0.35), borderRadius: BorderRadius.circular(99)),
+                        ),
+                      ),
+                    ),
+                ]),
+              ],
+            ]),
+          ),
+        ]),
+      ),
     );
   }
 }
@@ -248,13 +249,13 @@ class _TitleLogoState extends State<_TitleLogo> {
   Widget build(BuildContext context) {
     final url = _url;
     if (url == null) {
-      return Text(widget.anime.name, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 28, height: 1.1, fontWeight: FontWeight.w800, letterSpacing: -0.5, color: Colors.white, shadows: [Shadow(blurRadius: 10, color: Color(0x99000000))]));
+      return Text(widget.anime.name, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: MediaQuery.of(context).size.width < 380 ? 24 : 28, height: 1.1, fontWeight: FontWeight.w800, letterSpacing: -0.5, color: Colors.white));
     }
     final w = MediaQuery.of(context).size.width;
     return Align(
       alignment: Alignment.centerLeft,
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: 96, maxWidth: w * 0.85),
+        constraints: BoxConstraints(maxHeight: w < 380 ? 72 : 92, maxWidth: w * 0.8),
         child: CachedNetworkImage(
           imageUrl: url,
           fit: BoxFit.contain,
@@ -437,12 +438,14 @@ class _LatestState extends State<_Latest> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 26, 16, 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SectionTitle(
-          'Latest Episodes',
-          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        LayoutBuilder(builder: (context, box) {
+          final narrow = box.maxWidth < 380;
+          final controls = Row(mainAxisSize: MainAxisSize.min, children: [
             GlassSwitch<bool>(
               value: _dub,
-              width: 112,
+              width: 92,
+              height: 30,
+              fontSize: 12,
               onChanged: (v) {
                 setState(() => _dub = v);
                 if (v && _items != null) _checkDubs(_items!, _token);
@@ -451,14 +454,16 @@ class _LatestState extends State<_Latest> {
             ),
             const SizedBox(width: 8),
             _Pager(page: _page, last: _last, onPage: _go),
-          ]),
-        ),
+          ]);
+          if (!narrow) return SectionTitle('Latest Episodes', trailing: controls);
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const SectionTitle('Latest Episodes'), const SizedBox(height: 10), controls]);
+        }),
         const SizedBox(height: 16),
         if (_dub && items != null)
           Container(
             margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: C.w(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: C.w(0.1))),
+            decoration: BoxDecoration(color: C.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.line)),
             child: Row(children: [
               if (_pending > 0) ...[const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70)), const SizedBox(width: 10)],
               Expanded(
@@ -479,7 +484,7 @@ class _LatestState extends State<_Latest> {
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 20, crossAxisSpacing: 10, childAspectRatio: 0.45),
+            gridDelegate: posterGrid(context),
             itemCount: shown.length,
             itemBuilder: (context, i) {
               final it = shown[i];
@@ -504,11 +509,12 @@ class _Pager extends StatelessWidget {
   Widget build(BuildContext context) {
     Widget btn(IconData i, bool on, VoidCallback f) => GestureDetector(
           onTap: on ? f : null,
-          child: Container(width: 28, height: 28, alignment: Alignment.center, child: Icon(i, size: 18, color: on ? C.w(0.85) : C.w(0.3))),
+          child: Container(width: 26, height: 26, alignment: Alignment.center, child: Icon(i, size: 17, color: on ? C.w(0.85) : C.w(0.3))),
         );
     return Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(99), border: Border.all(color: C.w(0.2))),
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      decoration: BoxDecoration(color: C.surface, borderRadius: BorderRadius.circular(99), border: Border.all(color: C.line)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         btn(Icons.chevron_left_rounded, page > 1, () => onPage(page - 1)),
         Text('$page/$last', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, fontFeatures: [FontFeature.tabularFigures()])),
@@ -608,27 +614,9 @@ class _RankedRow extends StatelessWidget {
       onTap: () => openInfo(context, a.id),
       child: Container(
         height: 96,
-        decoration: BoxDecoration(color: C.w(0.05), borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(color: C.raised, borderRadius: BorderRadius.circular(12)),
         clipBehavior: Clip.antiAlias,
         child: Stack(children: [
-          // faint artwork on the right
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: 220,
-            child: ShaderMask(
-              blendMode: BlendMode.dstIn,
-              shaderCallback: (r) => const LinearGradient(begin: Alignment.centerRight, end: Alignment.centerLeft, colors: [Colors.black, Colors.transparent]).createShader(r),
-              child: Opacity(
-                opacity: 0.2,
-                child: ColorFiltered(
-                  colorFilter: const ColorFilter.matrix(<double>[0.33, 0.33, 0.33, 0, 0, 0.33, 0.33, 0.33, 0, 0, 0.33, 0.33, 0.33, 0, 0, 0, 0, 0, 1, 0]),
-                  child: CachedNetworkImage(imageUrl: a.banner ?? a.thumb ?? '', fit: BoxFit.cover, memCacheWidth: 500, errorWidget: (_, __, ___) => const SizedBox()),
-                ),
-              ),
-            ),
-          ),
           Row(children: [
             SizedBox(width: 64, height: 96, child: CachedNetworkImage(imageUrl: a.thumb ?? '', fit: BoxFit.cover, memCacheWidth: 200, errorWidget: (_, __, ___) => Container(color: C.w(0.1)))),
             const SizedBox(width: 12),
@@ -643,7 +631,7 @@ class _RankedRow extends StatelessWidget {
                   const SizedBox(height: 8),
                   Padding(
                     padding: const EdgeInsets.only(left: 16),
-                    child: Wrap(spacing: 4, runSpacing: 4, children: [
+                    child: ChipRow(children: [
                       if (a.format != null) Chip2(a.format!.replaceAll('_', ' ')),
                       if (a.seasonYear != null) Chip2('${a.seasonYear}', icon: Icons.calendar_today_rounded),
                       if (eps != null && eps > 0) Chip2('$eps', icon: Icons.closed_caption_outlined),

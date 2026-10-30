@@ -152,7 +152,7 @@ class SearchScreenState extends State<SearchScreen> {
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: posterGrid(),
+              gridDelegate: posterGrid(context),
               itemCount: items.length,
               itemBuilder: (context, i) {
                 final a = items[i];

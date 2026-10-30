@@ -115,12 +115,8 @@ class _InfoScreenState extends State<InfoScreen> {
           height: 230 + top,
           width: double.infinity,
           child: Stack(fit: StackFit.expand, children: [
-            ShaderMask(
-              blendMode: BlendMode.dstIn,
-              shaderCallback: (r) => const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black, Colors.black, Colors.transparent], stops: [0, 0.6, 1]).createShader(r),
-              child: CachedNetworkImage(imageUrl: a.banner ?? a.poster ?? '', fit: BoxFit.cover, memCacheWidth: 900, errorWidget: (_, __, ___) => const SizedBox()),
-            ),
-            Container(color: C.k(0.25)),
+            CachedNetworkImage(imageUrl: a.banner ?? a.poster ?? '', fit: BoxFit.cover, memCacheWidth: 900, errorWidget: (_, __, ___) => const SizedBox()),
+            Container(color: C.k(0.5)),
           ]),
         ),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

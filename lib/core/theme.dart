@@ -10,6 +10,10 @@ class C {
   static const muted = Color(0xFF949BA4);
   static const border = Color(0xFF26272B);
   static const input = Color(0xFF2B2D31);
+  /// Flat Onyx surfaces, from the page (black) upwards.
+  static const surface = Color(0xFF0D0D0F);
+  static const raised = Color(0xFF17171A);
+  static const line = Color(0x1FFFFFFF);
   static const accent = Color(0xFF5865F2);
   static const lime = Color(0xFFBEF264);
   static const red = Color(0xFFDC2626);

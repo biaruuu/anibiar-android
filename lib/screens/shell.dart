@@ -53,7 +53,7 @@ class _ShellState extends State<Shell> {
             bottom: 11 + bottom,
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 336),
+                constraints: const BoxConstraints(maxWidth: 380),
                 child: Glass(
                   kind: GlassKind.nav,
                   radius: 999,
@@ -125,8 +125,7 @@ class _NavTabState extends State<_NavTab> {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(color: C.w(0.14)),
-                    gradient: RadialGradient(center: const Alignment(-0.4, -1), radius: 1.6, colors: [C.w(0.3), C.w(0.11), C.w(0.06)], stops: const [0, 0.55, 1]),
-                    boxShadow: [BoxShadow(color: C.k(0.35), blurRadius: 12, offset: const Offset(0, 4))],
+                    color: C.w(0.12),
                   ),
                 ),
               ),

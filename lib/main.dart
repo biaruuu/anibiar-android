@@ -32,6 +32,11 @@ class AniBiarApp extends StatelessWidget {
       theme: buildTheme(),
       darkTheme: buildTheme(),
       themeMode: ThemeMode.dark,
+      // keep layouts intact when the phone's font size is very large or very small
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: MediaQuery.of(context).textScaler.clamp(minScaleFactor: 0.9, maxScaleFactor: 1.1)),
+        child: child!,
+      ),
       home: const Shell(),
     );
   }

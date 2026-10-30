@@ -1,45 +1,39 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
 
-/// The website's glass styles (glass-btn, glass-white, glass-accent, glass-danger, glass-panel, glass-nav, glass-track).
+/// Surface styles. The names stay (btn, white, accent, ...) but every surface is now flat Onyx:
+/// a solid fill and a hairline border, no blur and no gradient.
 enum GlassKind { btn, white, accent, danger, panel, nav, track, bar }
 
 class _Spec {
-  const _Spec(this.top, this.bottom, this.border, this.blur, this.highlight, this.shadow);
-  final Color top;
-  final Color bottom;
+  const _Spec(this.fill, this.border);
+  final Color fill;
   final Color border;
-  final double blur;
-  final double highlight;
-  final double shadow;
 }
 
 _Spec _spec(GlassKind k) {
   switch (k) {
     case GlassKind.btn:
-      return _Spec(const Color.fromRGBO(84, 84, 92, 0.42), const Color.fromRGBO(22, 22, 26, 0.62), C.w(0.14), 18, 0.22, 0.4);
+      return const _Spec(C.raised, C.line);
     case GlassKind.white:
-      return _Spec(const Color.fromRGBO(255, 255, 255, 0.98), const Color.fromRGBO(226, 226, 232, 0.9), C.w(0.6), 18, 1, 0.4);
+      return const _Spec(Color(0xFFF2F3F5), Color(0xFFF2F3F5));
     case GlassKind.accent:
-      return _Spec(const Color.fromRGBO(120, 132, 255, 0.95), const Color.fromRGBO(74, 86, 220, 0.9), C.w(0.25), 18, 0.45, 0.4);
+      return const _Spec(C.accent, C.accent);
     case GlassKind.danger:
-      return _Spec(const Color.fromRGBO(255, 90, 90, 0.9), const Color.fromRGBO(200, 40, 50, 0.86), C.w(0.22), 18, 0.4, 0.4);
+      return const _Spec(C.red, C.red);
     case GlassKind.panel:
-      return _Spec(const Color.fromRGBO(44, 44, 50, 0.72), const Color.fromRGBO(12, 12, 15, 0.84), C.w(0.14), 26, 0.2, 0.55);
+      return const _Spec(C.surface, C.line);
     case GlassKind.nav:
-      return _Spec(const Color.fromRGBO(70, 70, 76, 0.5), const Color.fromRGBO(22, 22, 25, 0.64), C.w(0.14), 24, 0.24, 0.65);
+      return const _Spec(Color(0xF2111113), C.line);
     case GlassKind.bar:
-      // thin frosted glass of the website's video player
-      return _Spec(const Color.fromRGBO(255, 255, 255, 0.14), const Color.fromRGBO(255, 255, 255, 0.07), C.w(0.16), 16, 0.22, 0.25);
+      return const _Spec(Color(0x8C000000), Color(0x1FFFFFFF));
     case GlassKind.track:
-      return _Spec(const Color.fromRGBO(70, 70, 76, 0.45), const Color.fromRGBO(20, 20, 23, 0.62), C.w(0.14), 20, 0.2, 0.4);
+      return const _Spec(Color(0xFF0E0E10), C.line);
   }
 }
 
-/// A frosted glass surface: blurred backdrop, soft gradient, light edge and a bright top highlight.
+/// A flat surface with rounded corners, a hairline border and a gentle press animation.
 class Glass extends StatefulWidget {
   const Glass({
     super.key,
@@ -72,53 +66,22 @@ class _GlassState extends State<Glass> {
   @override
   Widget build(BuildContext context) {
     final s = _spec(widget.kind);
-    final r = BorderRadius.circular(widget.radius);
-    final surface = ClipRRect(
-      borderRadius: r,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: s.blur / 2, sigmaY: s.blur / 2),
-        child: Container(
-          width: widget.width,
-          height: widget.height,
-          padding: widget.padding,
-          alignment: widget.alignment,
-          decoration: BoxDecoration(
-            borderRadius: r,
-            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [s.top, s.bottom]),
-            border: Border.all(color: s.border, width: 1),
-          ),
-          foregroundDecoration: BoxDecoration(
-            borderRadius: r,
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.center,
-              colors: [C.w(s.highlight * 0.35), const Color(0x00FFFFFF)],
-            ),
-          ),
-          child: widget.child,
-        ),
-      ),
+    final box = Container(
+      width: widget.width,
+      height: widget.height,
+      padding: widget.padding,
+      alignment: widget.alignment,
+      decoration: BoxDecoration(color: s.fill, borderRadius: BorderRadius.circular(widget.radius), border: Border.all(color: s.border, width: 1)),
+      child: widget.child,
     );
-    final shadowed = DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: r,
-        boxShadow: [BoxShadow(color: C.k(s.shadow * 0.7), blurRadius: widget.kind == GlassKind.panel || widget.kind == GlassKind.nav ? 28 : 12, offset: const Offset(0, 5))],
-      ),
-      child: surface,
-    );
-    if (widget.onTap == null) return shadowed;
+    if (widget.onTap == null) return box;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: (_) => setState(() => _down = true),
       onTapUp: (_) => setState(() => _down = false),
       onTapCancel: () => setState(() => _down = false),
       onTap: widget.onTap,
-      child: AnimatedScale(
-        scale: _down ? 0.96 : 1,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-        child: shadowed,
-      ),
+      child: AnimatedScale(scale: _down ? 0.96 : 1, duration: const Duration(milliseconds: 110), curve: Curves.easeOut, child: box),
     );
   }
 }
@@ -206,15 +169,16 @@ class GlassIconButton extends StatelessWidget {
   }
 }
 
-/// Segmented glass switch: dark glass track, white glass bubble that slides to the chosen option.
+/// Segmented switch: dark track, white pill that slides to the chosen option. Sized to fit small phones.
 class GlassSwitch<T> extends StatelessWidget {
-  const GlassSwitch({super.key, required this.value, required this.onChanged, required this.options, this.height = 36, this.width});
+  const GlassSwitch({super.key, required this.value, required this.onChanged, required this.options, this.height = 32, this.width, this.fontSize = 12.5});
 
   final T value;
   final ValueChanged<T> onChanged;
   final List<(T, String)> options;
   final double height;
   final double? width;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -227,23 +191,16 @@ class GlassSwitch<T> extends StatelessWidget {
         kind: GlassKind.track,
         radius: 999,
         child: LayoutBuilder(builder: (context, box) {
-          final inner = box.maxWidth - 6;
-          final seg = inner / n;
+          final seg = (box.maxWidth - 6) / n;
           return Stack(children: [
             AnimatedPositioned(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOutBack,
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
               left: 3 + index * seg,
               top: 3,
               bottom: 3,
               width: seg,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(999),
-                  gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color.fromRGBO(255, 255, 255, 0.98), Color.fromRGBO(226, 226, 232, 0.9)]),
-                  boxShadow: [BoxShadow(color: C.k(0.45), blurRadius: 8, offset: const Offset(0, 3))],
-                ),
-              ),
+              child: DecoratedBox(decoration: BoxDecoration(borderRadius: BorderRadius.circular(999), color: const Color(0xFFF2F3F5))),
             ),
             Row(children: [
               const SizedBox(width: 3),
@@ -254,8 +211,8 @@ class GlassSwitch<T> extends StatelessWidget {
                     onTap: () => onChanged(o.$1),
                     child: Center(
                       child: AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 200),
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: o.$1 == value ? Colors.black : C.w(0.75)),
+                        duration: const Duration(milliseconds: 180),
+                        style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w700, color: o.$1 == value ? Colors.black : C.w(0.7)),
                         child: Text(o.$2),
                       ),
                     ),
@@ -270,7 +227,7 @@ class GlassSwitch<T> extends StatelessWidget {
   }
 }
 
-/// Dark rounded pill used on posters (episode number, rating, time left).
+/// Small flat pill used on posters (episode, format, year).
 class Chip2 extends StatelessWidget {
   const Chip2(this.text, {super.key, this.icon, this.glass = false});
   final String text;
@@ -280,15 +237,32 @@ class Chip2 extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final inner = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3.5),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        if (icon != null) ...[Icon(icon, size: 11, color: C.w(0.75)), const SizedBox(width: 3)],
-        Text(text, style: TextStyle(fontSize: 10.5, height: 1, color: C.w(0.75))),
+        if (icon != null) ...[Icon(icon, size: 10.5, color: C.w(0.75)), const SizedBox(width: 3)],
+        Text(text, maxLines: 1, style: TextStyle(fontSize: 10, height: 1, fontWeight: FontWeight.w600, color: C.w(0.78))),
       ]),
     );
-    if (glass) return Glass(kind: GlassKind.btn, radius: 999, child: inner);
-    return DecoratedBox(decoration: BoxDecoration(color: C.w(0.07), borderRadius: BorderRadius.circular(5)), child: inner);
+    return DecoratedBox(
+      decoration: BoxDecoration(color: glass ? C.raised : C.w(0.07), borderRadius: BorderRadius.circular(glass ? 999 : 6), border: glass ? Border.all(color: C.line) : null),
+      child: inner,
+    );
   }
+}
+
+/// A row of chips that always stays on one line: it shrinks to fit narrow cards instead of wrapping.
+class ChipRow extends StatelessWidget {
+  const ChipRow({super.key, required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: double.infinity,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [for (var i = 0; i < children.length; i++) ...[if (i > 0) const SizedBox(width: 4), children[i]]]),
+        ),
+      );
 }
 
 /// Bottom sheet styled like the website's glass panels.
@@ -297,7 +271,7 @@ Future<T?> showGlassSheet<T>(BuildContext context, {required WidgetBuilder build
     context: context,
     isScrollControlled: scroll,
     backgroundColor: Colors.transparent,
-    barrierColor: C.k(0.7),
+    barrierColor: C.k(0.72),
     builder: (ctx) => Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
       child: Glass(kind: GlassKind.panel, radius: 24, child: SafeArea(top: false, child: builder(ctx))),
