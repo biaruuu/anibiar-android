@@ -34,8 +34,10 @@ class Media(
 
 /** What every provider needs to know about an anime: AniList facts and the ani.zip episode data. */
 object Meta {
-    private val medias = ConcurrentHashMap<Int, Media>()
-    private val zips = ConcurrentHashMap<Int, JSONObject>()
+    private class MediaMem(val at: Long, val media: Media)
+    private val medias = ConcurrentHashMap<Int, MediaMem>()
+    private class ZipMem(val at: Long, val data: JSONObject)
+    private val zips = ConcurrentHashMap<Int, ZipMem>()
     private val offsets = ConcurrentHashMap<Int, Int>()
     private val flights = ConcurrentHashMap<String, Deferred<*>>()
 
@@ -49,7 +51,7 @@ object Meta {
     }
 
     suspend fun media(id: Int): Media {
-        medias[id]?.let { return it }
+        medias[id]?.let { if (System.currentTimeMillis() - it.at < 30 * 60_000) return it.media }
         return once("media:$id") {
             val d = AniList.query(
                 "query (\$id: Int) { Media(id: \$id, type: ANIME) { id idMal title { english romaji native } status format episodes seasonYear startDate { year } synonyms } }",
@@ -62,26 +64,26 @@ object Meta {
                 id, m.int("idMal"), t?.str("english"), t?.str("romaji"), t?.str("native"), status, m.str("format"),
                 m.int("episodes"), m.int("seasonYear"), m.obj("startDate")?.int("year"), m.arr("synonyms").strings(),
             )
-            medias[id] = media
+            medias[id] = MediaMem(System.currentTimeMillis(), media)
             media
         }
     }
 
     /** ani.zip: episode titles, pictures, descriptions and air dates. Null when it can't be reached. */
     suspend fun zip(id: Int): JSONObject? {
-        zips[id]?.let { return it }
+        zips[id]?.let { if (System.currentTimeMillis() - it.at < 30 * 60_000) return it.data }
         return once("zip:$id") {
             val cached = AppCache.read("zip:$id")
             val parsed = cached?.let { parseObject(it.data) }
-            if (parsed != null && cached.ageDays < 1) {
-                zips[id] = parsed
+            if (parsed != null && cached.ageMinutes < 30) {
+                zips[id] = ZipMem(System.currentTimeMillis(), parsed)
                 return@once parsed
             }
             try {
                 val r = Net.get("https://api.ani.zip/mappings?anilist_id=$id", mapOf("Accept" to "application/json", "User-Agent" to Net.UA), 10_000)
                 val j = if (r.ok) parseObject(r.body) else null
                 if (j != null && j.length() > 0) {
-                    zips[id] = j
+                    zips[id] = ZipMem(System.currentTimeMillis(), j)
                     AppCache.write("zip:$id", j.toString(), 86_400)
                 }
                 j ?: parsed
@@ -92,6 +94,14 @@ object Meta {
             }
         }
     }
+
+    /**
+     * The highest episode number a site's list may show. A finished anime is capped by its known count; one that is still
+     * airing is capped only by AniList's total (when it has one), so a brand-new episode is never cut off because
+     * ani.zip hasn't heard of it yet.
+     */
+    fun cap(media: Media, zip: JSONObject?): Int? =
+        if (media.status == "FINISHED") expectedCount(media, zip) else media.episodes?.takeIf { it > 0 }
 
     fun titles(media: Media, zip: JSONObject?): List<String> {
         val t = zip?.obj("titles")

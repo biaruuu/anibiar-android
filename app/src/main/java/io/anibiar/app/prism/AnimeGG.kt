@@ -76,7 +76,7 @@ object AnimeGG {
             val zip = Meta.zip(id)
             val titles = Meta.titles(media, zip)
             val all = LinkedHashMap<String, String>()
-            for (list in Web.parallel(Text.searchTerms(titles, 20)) { searchFn(it) }) for ((slug, text) in list) all.putIfAbsent(slug, text)
+            for (list in Web.parallel(Text.searchTerms(titles, 12)) { searchFn(it) }) for ((slug, text) in list) all.putIfAbsent(slug, text)
             val cands = all.mapNotNull { (slug, text) ->
                 val best = titles.maxOfOrNull { Text.titleScore(it, text, slug) } ?: 0.0
                 val identity = Text.identityScore(titles, listOf(text, slug.replace("-", " ")))
@@ -111,7 +111,7 @@ object AnimeGG {
         val s = series(id)
         val media = Meta.media(id)
         val zip = Meta.zip(id)
-        val expected = Meta.expectedCount(media, zip)
+        val expected = Meta.cap(media, zip)
         val rows = scrape(s.slug).mapNotNull {
             val n = if (s.offset) it.number - s.offsetBy else it.number
             if (n < 1) null else Web.Row(n, it.title, it.hasSub, it.hasDub)
@@ -150,7 +150,7 @@ object AnimeGG {
                         .put("quality", o.optString("label", "")).put("server", tab.server).put("referer", "$BASE/"),
                 )
             }
-            if (out.isEmpty()) null else out
+            if (out.isEmpty()) null else listOf(out.maxByOrNull { Regex("\\d+").find(it.optString("quality"))?.value?.toIntOrNull() ?: 0 }!!)
         }
         val streams = lists.flatten()
         if (streams.isEmpty()) throw PrismException("AnimeGG: no playable stream for episode $episode")

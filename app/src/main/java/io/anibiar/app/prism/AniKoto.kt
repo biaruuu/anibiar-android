@@ -60,64 +60,87 @@ object AniKoto {
         return if (eps.isEmpty()) null else Inspected(c, showId, eps, score)
     }
 
-    private val shows = ConcurrentHashMap<Int, Show>()
+    private class Mem(val at: Long, val show: Show, val used: List<Cand>)
+    private val shows = ConcurrentHashMap<Int, Mem>()
 
+    /** Picks the right site entry (or entries) among the inspected candidates; the same rules as the Anivexa provider. */
+    private fun choose(inspected: List<Inspected>, media: Media): Pair<Show, List<Cand>> {
+        val mal = media.idMal
+        val expectedEps = media.episodes?.takeIf { it > 0 }
+        val exact = if (mal != null) inspected.filter { i -> i.episodes.any { it.malId == mal } } else emptyList()
+        if (exact.isNotEmpty()) {
+            fun metrics(i: Inspected): List<Int> {
+                val r = i.episodes.filter { it.malId == mal }
+                val nums = r.map { it.number }.toSet()
+                val inRange = if (expectedEps != null) nums.count { it in 1..expectedEps } else 0
+                val complete = if (expectedEps != null && inRange == expectedEps) 1 else 0
+                val same = if (expectedEps != null && nums.size == expectedEps) 1 else 0
+                val excess = if (expectedEps == null) 0 else maxOf(0, nums.size - expectedEps)
+                return listOf(-complete, -same, -inRange, excess)
+            }
+            val sorted = exact.sortedWith { a, b ->
+                val ma = metrics(a); val mb = metrics(b)
+                for (k in ma.indices) if (ma[k] != mb[k]) return@sortedWith ma[k].compareTo(mb[k])
+                b.score.compareTo(a.score)
+            }
+            val chosen = sorted[0]
+            val eps = chosen.episodes.filter { it.malId == mal }.toMutableList()
+            val numbers = eps.map { it.number }.toMutableSet()
+            val used = arrayListOf(chosen.cand)
+            for (other in sorted.drop(1)) {
+                val r = other.episodes.filter { it.malId == mal }
+                if (r.isEmpty() || r.any { it.number in numbers }) continue
+                r.forEach { numbers.add(it.number); eps.add(it) }
+                used.add(other.cand)
+            }
+            eps.sortBy { it.number }
+            var finalEps: List<Row> = eps
+            if (expectedEps != null && eps.size > expectedEps) {
+                val range = LinkedHashMap<Int, Row>()
+                eps.forEach { if (it.number in 1..expectedEps) range.putIfAbsent(it.number, it) }
+                if (range.size == expectedEps) finalEps = range.values.sortedBy { it.number }
+            }
+            return Show(chosen.cand.slug, chosen.cand.name, chosen.showId, finalEps) to used
+        }
+        val viable = inspected.filter { i -> i.score >= 0.72 && (mal == null || i.episodes.none { it.malId != null }) }.sortedByDescending { it.score }
+        val chosen = viable.firstOrNull()
+        val runner = viable.getOrNull(1)
+        if (chosen == null || (runner != null && chosen.score - runner.score < 0.08)) throw PrismException("AniKoto has no confident match")
+        return Show(chosen.cand.slug, chosen.cand.name, chosen.showId, chosen.episodes) to listOf(chosen.cand)
+    }
+
+    /** The show with a fresh episode list: the match is kept for good, the episode list is re-read every 2 minutes. */
     private suspend fun show(id: Int): Show {
-        shows[id]?.let { return it }
+        val have = shows[id]
+        if (have != null && System.currentTimeMillis() - have.at < 120_000) return have.show
         return Meta.once("anikoto:$id") {
             val media = Meta.media(id)
+            if (have != null) {
+                // the entries are already known: only their episode lists are read again
+                try {
+                    val again = Web.parallel(have.used) { c -> inspect(c, 1.0) }
+                    if (again.isNotEmpty()) {
+                        val (show, used) = choose(again, media)
+                        shows[id] = Mem(System.currentTimeMillis(), show, used)
+                        return@once show
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
+                return@once have.show
+            }
             val zip = Meta.zip(id)
             val titles = Meta.titles(media, zip)
             val found = LinkedHashMap<String, Cand>()
-            for (list in Web.parallel(Text.searchTerms(titles, 18)) { search(it) }) for (c in list) found.putIfAbsent(c.slug, c)
+            for (list in Web.parallel(Text.searchTerms(titles, 14)) { search(it) }) for (c in list) found.putIfAbsent(c.slug, c)
             val ranked = found.values.map { it to Text.identityScore(titles, listOf(it.name, it.jp, it.slug.replace("-", " "))) }
-                .filter { it.second >= 0.28 }.sortedByDescending { it.second }.take(12)
+                .filter { it.second >= 0.28 }.sortedByDescending { it.second }.take(10)
             if (ranked.isEmpty()) throw PrismException("AniKoto has no candidates for this anime")
             val inspected = Web.parallel(ranked) { inspect(it.first, it.second) }
-            val mal = media.idMal
-            val expectedEps = media.episodes?.takeIf { it > 0 }
-            val result: Show
-            val exact = if (mal != null) inspected.filter { i -> i.episodes.any { it.malId == mal } } else emptyList()
-            if (exact.isNotEmpty()) {
-                fun metrics(i: Inspected): List<Int> {
-                    val r = i.episodes.filter { it.malId == mal }
-                    val nums = r.map { it.number }.toSet()
-                    val inRange = if (expectedEps != null) nums.count { it in 1..expectedEps } else 0
-                    val complete = if (expectedEps != null && inRange == expectedEps) 1 else 0
-                    val same = if (expectedEps != null && nums.size == expectedEps) 1 else 0
-                    val excess = if (expectedEps == null) 0 else maxOf(0, nums.size - expectedEps)
-                    return listOf(-complete, -same, -inRange, excess)
-                }
-                val sorted = exact.sortedWith { a, b ->
-                    val ma = metrics(a); val mb = metrics(b)
-                    for (k in ma.indices) if (ma[k] != mb[k]) return@sortedWith ma[k].compareTo(mb[k])
-                    b.score.compareTo(a.score)
-                }
-                val chosen = sorted[0]
-                val eps = chosen.episodes.filter { it.malId == mal }.toMutableList()
-                val numbers = eps.map { it.number }.toMutableSet()
-                for (other in sorted.drop(1)) {
-                    val r = other.episodes.filter { it.malId == mal }
-                    if (r.isEmpty() || r.any { it.number in numbers }) continue
-                    r.forEach { numbers.add(it.number); eps.add(it) }
-                }
-                eps.sortBy { it.number }
-                var finalEps: List<Row> = eps
-                if (expectedEps != null && eps.size > expectedEps) {
-                    val range = LinkedHashMap<Int, Row>()
-                    eps.forEach { if (it.number in 1..expectedEps) range.putIfAbsent(it.number, it) }
-                    if (range.size == expectedEps) finalEps = range.values.sortedBy { it.number }
-                }
-                result = Show(chosen.cand.slug, chosen.cand.name, chosen.showId, finalEps)
-            } else {
-                val viable = inspected.filter { i -> i.score >= 0.72 && (mal == null || i.episodes.none { it.malId != null }) }.sortedByDescending { it.score }
-                val chosen = viable.firstOrNull()
-                val runner = viable.getOrNull(1)
-                if (chosen == null || (runner != null && chosen.score - runner.score < 0.08)) throw PrismException("AniKoto has no confident match")
-                result = Show(chosen.cand.slug, chosen.cand.name, chosen.showId, chosen.episodes)
-            }
-            shows[id] = result
-            result
+            val (show, used) = choose(inspected, media)
+            shows[id] = Mem(System.currentTimeMillis(), show, used)
+            show
         }
     }
 

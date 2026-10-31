@@ -5,6 +5,7 @@ package io.anibiar.app.ui.player
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -42,7 +43,7 @@ class SkipToast(val kind: SkipKind, val from: Double)
 /** One picture quality the stream offers (a row in the Quality menu). */
 class QualityLevel(val height: Int, internal val group: TrackGroup, internal val index: Int, internal val bitrate: Int)
 
-private class Cue(val start: Double, val end: Double, val text: String)
+internal class Cue(val start: Double, val end: Double, val text: String)
 
 private fun cueTime(raw: String): Double? {
     val p = raw.trim().replace(',', '.').split(':')
@@ -86,12 +87,14 @@ private fun cleanCaption(s: String): String = s
  * Everything the player knows: the video (Media3 ExoPlayer), captions, quality, speed and intro/outro skipping.
  * The controls (inline and fullscreen) only draw this and call its methods. All calls must be made on the main thread.
  */
+private val sharedExecutor: java.util.concurrent.Executor by lazy { java.util.concurrent.Executors.newFixedThreadPool(4) }
+
 class PlayerState(context: Context) {
     val exo: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
         // start playing after 0.8 s of video, keep up to a minute buffered, and begin with a fast-network guess
         .setLoadControl(
             androidx.media3.exoplayer.DefaultLoadControl.Builder()
-                .setBufferDurationsMs(25_000, 60_000, 800, 2_000)
+                .setBufferDurationsMs(30_000, 90_000, 800, 2_500)
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build(),
         )
@@ -190,6 +193,9 @@ class PlayerState(context: Context) {
     /* ---------- private bookkeeping ---------- */
 
     private var cues: List<Cue> = emptyList()
+    private var curUrl = ""
+    private var curHls = true
+    private var curHeaders: Map<String, String> = emptyMap()
     private var trackGen = 0
     private val skipped = booleanArrayOf(false, false)
     private val inside = booleanArrayOf(false, false)
@@ -305,9 +311,11 @@ class PlayerState(context: Context) {
 
         val merged = LinkedHashMap(headers)
         subtitles.firstOrNull()?.headers?.forEach { (k, v) -> merged.putIfAbsent(k, v) }
+        curUrl = url; curHls = hls; curHeaders = merged
+        clipMessage = null
         val engine = Net.cronet
         val dataSource: androidx.media3.datasource.DataSource.Factory = if (engine != null) {
-            androidx.media3.datasource.cronet.CronetDataSource.Factory(engine, java.util.concurrent.Executors.newFixedThreadPool(4))
+            androidx.media3.datasource.cronet.CronetDataSource.Factory(engine, sharedExecutor)
                 .setDefaultRequestProperties(merged)
         } else {
             OkHttpDataSource.Factory(Net.client).setDefaultRequestProperties(merged)
@@ -315,7 +323,9 @@ class PlayerState(context: Context) {
         val item = MediaItem.Builder().setUri(url).apply { if (hls) setMimeType(MimeTypes.APPLICATION_M3U8) }.build()
         val source = DefaultMediaSourceFactory(dataSource).createMediaSource(item)
 
-        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
+        // always the best picture the stream and the phone can show
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+            .setForceHighestSupportedBitrate(true).build()
         exo.setMediaSource(source, if (startAt > 1) (startAt * 1000).toLong() else 0L)
         exo.setPlaybackSpeed(speed)
         exo.volume = if (muted) 0f else 1f
@@ -335,6 +345,68 @@ class PlayerState(context: Context) {
         if (pick < 0 && subtitles.isNotEmpty()) pick = 0
         setTrack(pick)
     }
+
+    /* ---------------------------------- clips ---------------------------------- */
+
+    var clipStart by mutableDoubleStateOf(0.0)
+        private set
+    var clipLength by mutableIntStateOf(15)
+        private set
+    var clipBusy by mutableStateOf(false)
+        private set
+    var clipProgress by mutableFloatStateOf(0f)
+        private set
+    var clipMessage by mutableStateOf<String?>(null)
+        private set
+    private var clipJob: Job? = null
+    var clipTitle: String = "AniBiar"
+
+    /** The clip starts where the viewer is now. */
+    fun beginClip() {
+        clipStart = position
+        if (!clipBusy) clipMessage = null
+        exo.pause()
+        setMenuView("clip")
+    }
+
+    fun setClipLength(seconds: Int) { clipLength = seconds.coerceIn(3, 60) }
+
+    fun nudgeClipStart(delta: Double) {
+        clipStart = (clipStart + delta).coerceIn(0.0, (if (duration > 0) duration - 3 else clipStart + delta).coerceAtLeast(0.0))
+    }
+
+    fun useCurrentForClip() { clipStart = position }
+
+    fun saveClip(context: Context) {
+        if (clipBusy || released || curUrl.isEmpty()) return
+        val room = if (duration > 0) duration - clipStart else clipLength.toDouble()
+        val length = minOf(clipLength.toDouble(), room)
+        if (length < 2) { clipMessage = "Too close to the end for a clip."; return }
+        val req = ClipRequest(
+            url = curUrl, hls = curHls, headers = curHeaders, start = clipStart, length = length,
+            cues = cues.map { ClipCue(it.start, it.end, it.text) },
+            scale = captionScale, box = captionBox, fontId = io.anibiar.app.ui.FontChoice.captionId, name = clipTitle,
+        )
+        clipBusy = true
+        clipProgress = 0f
+        clipMessage = null
+        clipJob = scope.launch {
+            try {
+                ClipMaker.make(context.applicationContext, req) { clipProgress = it }
+                clipMessage = "Saved to your gallery (Movies/AniBiar)."
+                android.widget.Toast.makeText(context.applicationContext, "Clip saved to your gallery", android.widget.Toast.LENGTH_LONG).show()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                clipMessage = "Cancelled."
+                throw e
+            } catch (e: Throwable) {
+                clipMessage = "Could not save the clip: ${(e.message ?: e.javaClass.simpleName).take(120)}"
+            } finally {
+                clipBusy = false
+            }
+        }
+    }
+
+    fun cancelClip() { clipJob?.cancel() }
 
     /* --------------------------------- quality --------------------------------- */
 

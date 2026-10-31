@@ -167,13 +167,13 @@ object Streams {
     suspend fun episodes(animeId: Int, force: Boolean = false, onUpdate: ((EpisodesPayload) -> Unit)? = null): EpisodesPayload {
         if (onUpdate != null) listeners.getOrPut(animeId) { CopyOnWriteArrayList() }.add(onUpdate)
         val hit = memory[animeId]
-        if (!force && hit != null && System.currentTimeMillis() - hit.at < 10 * 60_000) return hit.data
+        if (!force && hit != null && System.currentTimeMillis() - hit.at < 3 * 60_000) return hit.data
         if (!force) {
             val cached = AppCache.read("ep:$animeId")
             val parsed = cached?.let { c -> parseObject(c.data)?.let { runCatching { EpisodesPayload.fromJson(it) }.getOrNull() } }
             if (cached != null && parsed != null && (parsed.sub.isNotEmpty() || parsed.dub.isNotEmpty())) {
                 memory[animeId] = Mem(cached.atMs, parsed)
-                if (cached.ageMinutes >= 10) refresh(animeId, quiet = true)
+                if (cached.ageMinutes >= 3) refresh(animeId, quiet = true)
                 return parsed
             }
         }
@@ -298,6 +298,19 @@ object Streams {
         val key = "$animeId:$episode"
         dubMemory[key]?.let { return it }
         memory[animeId]?.data?.dub?.let { list -> if (list.any { it.number == episode }) { dubMemory[key] = true; return true } }
+        dubGate.acquire()
+        try {
+            return hasDubNow(animeId, episode, key)
+        } finally {
+            dubGate.release()
+        }
+    }
+
+    /** The home screen asks about many cards at once; only one is looked up at a time so the phone and the sites aren't flooded. */
+    private val dubGate = kotlinx.coroutines.sync.Semaphore(1)
+
+    private suspend fun hasDubNow(animeId: Int, episode: Int, key: String): Boolean {
+        dubMemory[key]?.let { return it }
         val order = Config.providers
         val result = CompletableDeferred<Boolean>()
         val lock = Any()

@@ -78,7 +78,7 @@ object AniWaves {
             val titles = Meta.titles(media, zip)
             val expected = Meta.expectedCount(media, zip)
             val found = LinkedHashMap<String, Card>()
-            for (list in Web.parallel(Text.searchTerms(titles, 20)) { q -> cards(Web.html("$BASE/filter?keyword=${enc(q)}", "$BASE/")) }) for (c in list) found.putIfAbsent(c.slug, c)
+            for (list in Web.parallel(Text.searchTerms(titles, 12)) { q -> cards(Web.html("$BASE/filter?keyword=${enc(q)}", "$BASE/")) }) for (c in list) found.putIfAbsent(c.slug, c)
             fun idScore(c: Card) = Text.identityScore(titles, listOf(c.title, c.japanese, c.slug.replace("-", " ")))
             val short = found.values.map { it to idScore(it) }.filter { it.second >= 0.5 }.sortedByDescending { it.second }.take(12)
             val details = Web.parallel(short) { detail(it.first) }
@@ -161,7 +161,7 @@ object AniWaves {
         lists[id]?.let { if (System.currentTimeMillis() - it.at < 60_000) return it.eps }
         val media = Meta.media(id)
         val zip = Meta.zip(id)
-        val eps = align(fetchEps(s), media, Meta.expectedCount(media, zip), s)
+        val eps = align(fetchEps(s), media, Meta.cap(media, zip), s)
         lists[id] = Cached(System.currentTimeMillis(), eps)
         return eps
     }
@@ -172,7 +172,7 @@ object AniWaves {
         val zip = Meta.zip(id)
         val eps = aligned(id, s)
         val rows = eps.map { Web.Row(it.number, it.title, it.hasSub, it.hasDub, it.duration?.takeIf { d -> d > 0 }, it.filler, it.airDate) }
-        return Web.episodeList(id, "aniwaves", rows, zip, Meta.expectedCount(media, zip), s.title, JSONObject().put("slug", s.slug))
+        return Web.episodeList(id, "aniwaves", rows, zip, Meta.cap(media, zip), s.title, JSONObject().put("slug", s.slug))
     }
 
     private class Server(val audio: String, val linkId: String, val name: String)

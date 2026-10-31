@@ -1,0 +1,247 @@
+package io.anibiar.app.ui.player
+
+import android.content.ContentValues
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
+import android.util.Size
+import androidx.core.content.res.ResourcesCompat
+import androidx.media3.common.Effect
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.Clock
+import androidx.media3.datasource.DataSource
+import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultAssetLoaderFactory
+import androidx.media3.transformer.DefaultDecoderFactory
+import androidx.media3.transformer.DefaultEncoderFactory
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.Effects
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.ProgressHolder
+import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.VideoEncoderSettings
+import com.google.common.collect.ImmutableList
+import io.anibiar.app.R
+import io.anibiar.app.core.Net
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import java.io.File
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+class ClipCue(val start: Double, val end: Double, val text: String)
+
+class ClipRequest(
+    val url: String,
+    val hls: Boolean,
+    val headers: Map<String, String>,
+    val start: Double,
+    val length: Double,
+    val cues: List<ClipCue>,
+    /** Caption look, the same one the player shows. */
+    val scale: Float,
+    val box: Boolean,
+    val fontId: String,
+    val name: String,
+)
+
+/**
+ * Saves up to one minute of the episode to the phone's gallery (Movies/AniBiar), in the best picture the stream has,
+ * with the subtitles drawn into the video in the font and style the viewer picked.
+ */
+object ClipMaker {
+    private val bandwidth = Regex("BANDWIDTH=(\\d+)")
+
+    /** The best picture of an HLS stream: the highest-bitrate variant, when it can be played on its own. */
+    private suspend fun best(url: String, headers: Map<String, String>): String {
+        return try {
+            val r = Net.get(url, headers, 12_000)
+            if (!r.ok || !r.body.contains("#EXT-X-STREAM-INF")) return url
+            val lines = r.body.lines()
+            var top = -1L
+            var pick: String? = null
+            var needsAudio = false
+            for ((i, l) in lines.withIndex()) {
+                if (!l.startsWith("#EXT-X-STREAM-INF")) continue
+                val bw = bandwidth.find(l)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                val next = lines.drop(i + 1).firstOrNull { it.isNotBlank() && !it.startsWith("#") } ?: continue
+                if (bw > top) {
+                    top = bw
+                    pick = next.trim()
+                    needsAudio = Regex("AUDIO=\"").containsMatchIn(l)
+                }
+            }
+            if (pick == null || needsAudio) url else java.net.URI(url).resolve(pick).toString()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            url
+        }
+    }
+
+    private class Overlay(private val ctx: Context, private val req: ClipRequest) : BitmapOverlay() {
+        private var size = Size(1280, 720)
+        private val empty = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        private var lastText: String? = null
+        private var lastBitmap: Bitmap = empty
+
+        private val face: Typeface = try {
+            ResourcesCompat.getFont(ctx, if (req.fontId == "fira") R.font.caption_bold else R.font.trebuchet_regular) ?: Typeface.DEFAULT_BOLD
+        } catch (_: Exception) {
+            Typeface.DEFAULT_BOLD
+        }
+
+        override fun configure(videoSize: Size) {
+            super.configure(videoSize)
+            size = videoSize
+            lastText = null
+        }
+
+        private fun clean(s: String) = s.replace(Regex("<[^>]*>"), "").replace(Regex("\\{[^}]*\\}"), "")
+            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ").trim()
+
+        override fun getBitmap(presentationTimeUs: Long): Bitmap {
+            val t = req.start + presentationTimeUs / 1_000_000.0
+            val text = req.cues.firstOrNull { t >= it.start && t <= it.end }?.let { clean(it.text) } ?: ""
+            if (text == lastText) return lastBitmap
+            lastText = text
+            lastBitmap = if (text.isEmpty()) empty else render(text)
+            return lastBitmap
+        }
+
+        private fun render(text: String): Bitmap {
+            val w = size.width
+            val h = size.height
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            val px = w * 0.034f * (req.scale / 0.88f)
+            fun paint(stroke: Boolean) = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                typeface = face
+                isFakeBoldText = req.fontId != "fira"
+                textSize = px
+                if (stroke) { style = Paint.Style.STROKE; strokeWidth = px * 0.26f; strokeJoin = Paint.Join.ROUND; color = Color.BLACK }
+                else { style = Paint.Style.FILL; color = Color.WHITE }
+            }
+            val maxW = (w * 0.86f).toInt()
+            fun layout(p: TextPaint) = StaticLayout.Builder.obtain(text, 0, text.length, p, maxW)
+                .setAlignment(Layout.Alignment.ALIGN_CENTER).setLineSpacing(0f, 1.15f).build()
+            val fill = layout(paint(false))
+            val stroke = layout(paint(true))
+            val x = (w - maxW) / 2f
+            val y = h - h * 0.07f - fill.height
+            c.save()
+            c.translate(x, y)
+            if (req.box) {
+                val pad = px * 0.4f
+                val bg = Paint().apply { color = Color.argb(190, 0, 0, 0) }
+                c.drawRoundRect(-pad, -pad * 0.3f, maxW + pad, fill.height + pad * 0.3f, px * 0.35f, px * 0.35f, bg)
+            } else {
+                stroke.draw(c)
+            }
+            fill.draw(c)
+            c.restore()
+            return bmp
+        }
+    }
+
+    /** Makes the clip and returns where it was saved. Must be called on the main thread. */
+    suspend fun make(ctx: Context, req: ClipRequest, onProgress: (Float) -> Unit): Uri {
+        val source = if (req.hls) best(req.url, req.headers) else req.url
+        val app = ctx.applicationContext
+        val engine = Net.cronet
+        val data: DataSource.Factory = if (engine != null) {
+            androidx.media3.datasource.cronet.CronetDataSource.Factory(engine, java.util.concurrent.Executors.newFixedThreadPool(3)).setDefaultRequestProperties(req.headers)
+        } else {
+            androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(Net.client).setDefaultRequestProperties(req.headers)
+        }
+        val mediaItem = MediaItem.Builder().setUri(source).apply { if (req.hls) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            .setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs((req.start * 1000).toLong())
+                    .setEndPositionMs(((req.start + req.length) * 1000).toLong())
+                    .build(),
+            ).build()
+        val effects = ArrayList<Effect>()
+        if (req.cues.isNotEmpty()) effects.add(OverlayEffect(ImmutableList.of(Overlay(app, req))))
+        val edited = EditedMediaItem.Builder(mediaItem).setEffects(Effects(emptyList(), effects)).build()
+
+        val out = File(app.cacheDir, "clip-${System.currentTimeMillis()}.mp4")
+        val encoder = DefaultEncoderFactory.Builder(app)
+            .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(9_000_000).build())
+            .setEnableFallback(true)
+            .build()
+        val loader = DefaultAssetLoaderFactory(app, DefaultDecoderFactory.Builder(app).build(), Clock.DEFAULT, DefaultMediaSourceFactory(data))
+
+        suspendCancellableCoroutine { cont ->
+            val transformer = Transformer.Builder(app)
+                .setVideoMimeType(MimeTypes.VIDEO_H264)
+                .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                .setEncoderFactory(encoder)
+                .setAssetLoaderFactory(loader)
+                .addListener(object : Transformer.Listener {
+                    override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                        if (cont.isActive) cont.resume(Unit)
+                    }
+
+                    override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+                        if (cont.isActive) cont.resumeWithException(exportException)
+                    }
+                })
+                .build()
+            cont.invokeOnCancellation { try { transformer.cancel() } catch (_: Exception) {} }
+            transformer.start(edited, out.absolutePath)
+            val holder = ProgressHolder()
+            io.anibiar.app.App.scope.launch(Dispatchers.Main) {
+                while (cont.isActive) {
+                    if (transformer.getProgress(holder) == Transformer.PROGRESS_STATE_AVAILABLE) onProgress(holder.progress / 100f)
+                    delay(300)
+                }
+            }
+        }
+        return withContext(Dispatchers.IO) { saveToGallery(app, out, req.name) }
+    }
+
+    private fun saveToGallery(ctx: Context, file: File, name: String): Uri {
+        val safe = name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifEmpty { "AniBiar" }.take(60)
+        val fileName = "$safe ${System.currentTimeMillis() / 1000}.mp4"
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/AniBiar")
+                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                }
+                val uri = ctx.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: throw java.io.IOException("Could not create the video")
+                ctx.contentResolver.openOutputStream(uri)?.use { o -> file.inputStream().use { it.copyTo(o) } }
+                ctx.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+                return uri
+            }
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "AniBiar").apply { mkdirs() }
+            val dest = File(dir, fileName)
+            file.copyTo(dest, overwrite = true)
+            android.media.MediaScannerConnection.scanFile(ctx, arrayOf(dest.absolutePath), arrayOf("video/mp4"), null)
+            return Uri.fromFile(dest)
+        } finally {
+            file.delete()
+        }
+    }
+}

@@ -291,6 +291,7 @@ private class WatchModel(
         } else {
             start = player.position
         }
+        player.clipTitle = (detail?.anime?.title?.let { it.english ?: it.romaji } ?: "AniBiar") + " EP$ep"
         player.open(s.src, s.hls, s.headers, if (s.soft) s.subtitles else emptyList(), start, k.intro, k.outro, k.length)
     }
 

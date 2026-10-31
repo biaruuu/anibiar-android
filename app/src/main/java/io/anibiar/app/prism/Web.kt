@@ -5,6 +5,8 @@ import io.anibiar.app.core.parseObject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -12,10 +14,13 @@ import org.json.JSONObject
 object Web {
     const val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
+    /** At most this many site requests at the same time, so a burst of searches can't choke the phone or the network. */
+    val gate = Semaphore(10)
+
     suspend fun html(url: String, referer: String? = null, timeoutMs: Long = 15_000): String {
         val h = linkedMapOf("User-Agent" to UA, "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language" to "en-US,en;q=0.9")
         if (referer != null) h["Referer"] = referer
-        val r = Net.get(url, h, timeoutMs)
+        val r = gate.withPermit { Net.get(url, h, timeoutMs) }
         if (!r.ok) throw PrismException("HTTP ${r.code} for ${url.substringAfter("://").substringBefore("?").take(60)}")
         return r.body
     }
@@ -23,7 +28,7 @@ object Web {
     suspend fun json(url: String, referer: String? = null, timeoutMs: Long = 15_000): JSONObject {
         val h = linkedMapOf("User-Agent" to UA, "Accept" to "application/json, text/javascript, */*; q=0.01", "X-Requested-With" to "XMLHttpRequest")
         if (referer != null) h["Referer"] = referer
-        val r = Net.get(url, h, timeoutMs)
+        val r = gate.withPermit { Net.get(url, h, timeoutMs) }
         if (!r.ok) throw PrismException("HTTP ${r.code} for ${url.substringAfter("://").substringBefore("?").take(60)}")
         return parseObject(r.body) ?: throw PrismException("Invalid answer from ${url.substringAfter("://").substringBefore("/")}")
     }
@@ -32,7 +37,7 @@ object Web {
     suspend fun <T, R : Any> parallel(items: List<T>, block: suspend (T) -> R?): List<R> = coroutineScope {
         items.map { item ->
             async {
-                try { block(item) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                try { block(item) } catch (e: CancellationException) { throw e } catch (_: Throwable) { null }
             }
         }.mapNotNull { it.await() }
     }

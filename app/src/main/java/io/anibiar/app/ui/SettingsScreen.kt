@@ -314,6 +314,7 @@ private fun ConnectionReport() {
         sb.appendLine("Streaming engine: Prism (built in)")
         sb.appendLine("Upstash cache: ${if (Config.upstashOn) "on" else "off"}")
         sb.appendLine("Network stack: ${io.anibiar.app.core.Net.stackName}")
+        io.anibiar.app.core.Prefs.getString("crash.last")?.let { sb.appendLine("Last crash: $it") }
         sb.appendLine("TMDB logos: ${if (Config.tmdbOn) "on" else "off"}")
         if (results.isNotEmpty()) {
             sb.appendLine()
