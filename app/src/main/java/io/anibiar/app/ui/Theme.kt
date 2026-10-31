@@ -49,6 +49,7 @@ object C {
 }
 
 /** Inter (variable font, SIL OFL), the same typeface family as Miruro. */
+@OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
 val Inter = FontFamily(
     listOf(400, 500, 600, 700, 800, 900).map { w ->
         Font(R.font.inter, FontWeight(w), variationSettings = FontVariation.Settings(FontVariation.weight(w)))

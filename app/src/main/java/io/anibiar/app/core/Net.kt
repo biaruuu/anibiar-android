@@ -59,7 +59,7 @@ object Net {
             val engine = cronet
             if (engine != null) {
                 try {
-                    addInterceptor(com.google.net.cronet.okhttptransportation.CronetInterceptor.newBuilder(engine).build())
+                    addInterceptor(com.google.net.cronet.okhttptransport.CronetInterceptor.newBuilder(engine).build())
                 } catch (_: Throwable) {
                 }
             }
