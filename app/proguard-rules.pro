@@ -7,3 +7,8 @@
 -dontwarn javax.annotation.**
 -keep class io.anibiar.app.BuildConfig { *; }
 -keepclassmembers class * extends org.json.JSONObject { *; }
+-dontwarn org.mozilla.javascript.**
+-dontwarn java.beans.**
+-dontwarn javax.script.**
+-dontwarn jdk.dynalink.**
+-keep class org.mozilla.javascript.** { *; }

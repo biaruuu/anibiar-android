@@ -230,6 +230,11 @@ private class WatchModel(
                 if (w.streams.isEmpty()) throw ApiException("No stream is available for this episode right now.")
                 watch = w
                 openStream(resume = true)
+                // warm the next episode so "next" starts without waiting
+                (if (isDub) eps?.dub else eps?.sub)?.firstOrNull { it.number > e.number }?.let { nx ->
+                    val d = isDub
+                    scope.launch { try { Streams.watch(animeId, d, nx.number) } catch (c: CancellationException) { throw c } catch (_: Exception) {} }
+                }
                 fetchSkip(g, e.number)
             } catch (ce: CancellationException) {
                 throw ce

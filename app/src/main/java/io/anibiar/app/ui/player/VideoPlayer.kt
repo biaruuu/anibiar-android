@@ -404,6 +404,9 @@ private fun SeekBar(state: PlayerState) {
     }
 }
 
+/** Trebuchet MS is Microsoft's and not on Android, so the captions use Fira Sans, a similar humanist sans. */
+private val CaptionFont = FontFamily(androidx.compose.ui.text.font.Font(io.anibiar.app.R.font.caption_bold, FontWeight.Bold))
+
 /** Captions drawn by us: white text with a dark outline, or on a dark box. */
 @Composable
 private fun BoxScope.Captions(state: PlayerState, w: Float, controls: Boolean) {
@@ -414,10 +417,10 @@ private fun BoxScope.Captions(state: PlayerState, w: Float, controls: Boolean) {
     // same sizing as the website: clamp(0.85rem, 2.6cqw, 2.5rem) times the chosen size
     val size = cl(15f, w * 0.03f, 34f) * state.captionScale
     // sits low on the picture; lifts a little only while the control bar is showing
-    val lift = if (controls) cl(52f, w * 0.1f, 100f) else cl(10f, w * 0.022f, 30f)
+    val lift = if (controls) cl(46f, w * 0.09f, 90f) else cl(3f, w * 0.008f, 14f)
     val base = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
+        fontFamily = CaptionFont,
+        fontWeight = FontWeight.Bold,
         fontSize = size.sp,
         lineHeight = (size * 1.3f).sp,
         letterSpacing = 0.05.sp,

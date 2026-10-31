@@ -96,5 +96,6 @@ dependencies {
     implementation("androidx.media3:media3-datasource-cronet:$media3")
     implementation("com.google.android.gms:play-services-cronet:18.1.0")
     implementation("com.google.net.cronet:cronet-okhttp:0.1.0")
+    implementation("org.mozilla:rhino:1.7.15")
     implementation("androidx.media3:media3-ui:$media3")
 }

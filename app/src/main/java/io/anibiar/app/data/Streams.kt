@@ -372,8 +372,8 @@ object Streams {
     ): WatchPayload {
         val key = "$animeId:${if (dub) "dub" else "sub"}:$episode:${providers.joinToString(",")}"
         val audio = if (dub) "dub" else "sub"
-        val order = Config.providers.filter { providers.isEmpty() || providers.contains(it) }
-        if (order.isEmpty()) throw ApiException("No server has this episode.")
+        // "aurora" is the server built into the app (Vault.kt); it is asked together with the others
+        val order = Config.providers.filter { providers.isEmpty() || providers.contains(it) } + Vault.NAME.lowercase()
         val taken = HashSet<String>()
         val results = ConcurrentHashMap<String, ParsedWatch>()
         val done = CompletableDeferred<WatchPayload>()
@@ -396,8 +396,14 @@ object Streams {
         for (provider in order) {
             App.scope.launch {
                 try {
-                    val raw = getJson("$base/watch/$provider/$animeId/$audio/$provider-$episode", 25_000)
-                    val r = synchronized(taken) { parseWatch(provider, dub, raw, taken) }
+                    val r = if (provider == Vault.NAME.lowercase()) {
+                        val v = Vault.stream(animeId, episode, dub) ?: throw ApiException("Aurora has no stream for this episode.")
+                        synchronized(taken) { taken.add(Vault.NAME) }
+                        ParsedWatch(listOf(v.source), v.intro, v.outro)
+                    } else {
+                        val raw = getJson("$base/watch/$provider/$animeId/$audio/$provider-$episode", 25_000)
+                        synchronized(taken) { parseWatch(provider, dub, raw, taken) }
+                    }
                     if (r.streams.isNotEmpty()) {
                         results[provider] = r
                         val p = buildPayload()
