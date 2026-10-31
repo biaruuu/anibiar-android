@@ -41,6 +41,16 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.SwapVert
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -371,6 +381,8 @@ fun WatchScreen(id: Int, episode: Int, dub: Boolean, onBack: () -> Unit) {
     val m = remember(id) { WatchModel(id, episode, dub, player, scope) }
     var fullscreen by remember { mutableStateOf(false) }
     var serverSheet by remember { mutableStateOf(false) }
+    var episodeSheet by remember { mutableStateOf(false) }
+    var audioSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(m) { m.start() }
     DisposableEffect(m) {
@@ -386,6 +398,8 @@ fun WatchScreen(id: Int, episode: Int, dub: Boolean, onBack: () -> Unit) {
     FullscreenEffect(fullscreen)
     BackHandler(enabled = fullscreen) { fullscreen = false }
     BackHandler(enabled = serverSheet) { serverSheet = false }
+    BackHandler(enabled = episodeSheet) { episodeSheet = false }
+    BackHandler(enabled = audioSheet) { audioSheet = false }
 
     val ep = m.current
     val title = if (ep != null) "${m.name} · Episode ${ep.number}" else m.name
@@ -422,11 +436,13 @@ fun WatchScreen(id: Int, episode: Int, dub: Boolean, onBack: () -> Unit) {
                 },
             )
             if (!fullscreen) {
-                WatchBody(m, Modifier.weight(1f), onServers = { serverSheet = true })
+                WatchBody(m, Modifier.weight(1f), onServers = { serverSheet = true }, onEpisodes = { episodeSheet = true }, onAudio = { audioSheet = true })
             }
         }
 
         if (serverSheet && !fullscreen) ServerSheet(m, onClose = { serverSheet = false })
+        if (episodeSheet && !fullscreen) EpisodeSheet(m, onClose = { episodeSheet = false })
+        if (audioSheet && !fullscreen) AudioSheet(m, onClose = { audioSheet = false })
     }
 }
 
@@ -454,145 +470,156 @@ private fun BoxScope.PlayerStatus(error: String?, loadingEpisodes: Boolean, post
 }
 
 @Composable
-private fun WatchBody(m: WatchModel, modifier: Modifier, onServers: () -> Unit) {
+private fun WatchBody(m: WatchModel, modifier: Modifier, onServers: () -> Unit, onEpisodes: () -> Unit, onAudio: () -> Unit) {
     val ep = m.current
     val e = m.eps
     val a = m.detail?.anime
-    val streams = m.watch?.streams ?: emptyList()
-    val hasDub = e?.dub?.isNotEmpty() ?: false
-    val hasSub = e?.sub?.isNotEmpty() ?: false
-    val dubSet = remember(e) { e?.dub?.map { it.number }?.toSet() ?: emptySet() }
-    val list = if (m.reverse) m.list.asReversed() else m.list
-    val cols = ((screenWidth() - 32.dp + 8.dp) / 60.dp).toInt().coerceAtLeast(1)
     val inter = remember { MutableInteractionSource() }
+    var more by remember(m.ep, m.synopsis) { mutableStateOf(false) }
+    val shape16 = RoundedCornerShape(16.dp)
 
     LazyColumn(
         modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 40.dp + navBarHeight()),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 40.dp + navBarHeight()),
     ) {
         item(key = "title") {
             Column {
-                val extra = if (ep != null && ep.title.isNotEmpty() && ep.title != "Episode ${ep.number}") " · ${ep.title}" else ""
-                Text(if (ep == null) m.name else "Episode ${ep.number}$extra", fontSize = 18.sp, lineHeight = 22.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                Spacer(Modifier.height(4.dp))
-                Text(m.name, fontSize = 13.sp, color = C.w(0.55f))
-                Spacer(Modifier.height(14.dp))
+                val date = ep?.airDate?.let { prettyDate(it) }
+                Text(
+                    if (ep == null) "Loading…" else "Episode ${ep.number}" + (if (date != null) " · $date" else ""),
+                    fontSize = 14.sp, color = C.w(0.55f),
+                )
+                Spacer(Modifier.height(6.dp))
+                val t = ep?.title?.takeIf { it.isNotBlank() && it != "Episode ${ep.number}" } ?: m.name
+                Text(t, fontSize = 22.sp, lineHeight = 27.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                Spacer(Modifier.height(16.dp))
             }
         }
-        item(key = "controls") {
-            Column {
-                // audio + server + prev/next
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    FlatSwitch(
-                        value = m.isDub,
-                        options = listOf(false to "Sub", true to "Dub"),
-                        onChange = { v ->
-                            if (v != m.isDub) {
-                                if ((v && !hasDub) || (!v && !hasSub)) Toasts.show(if (v) "No English dub for this title yet." else "No subbed version found.")
-                                else m.selectAudio(v)
-                            }
-                        },
-                        width = 92.dp,
-                        height = 36.dp,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    FlatButton(
-                        label = m.stream?.name ?: "Server",
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Rounded.Dns,
-                        height = 36.dp,
-                        fontSize = 13,
-                        enabled = streams.size >= 2,
-                        onClick = onServers,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    val p = m.prev
-                    FlatIconButton(Icons.Rounded.SkipPrevious, { if (p != null) m.select(p.number) }, Modifier.alpha(if (p == null) 0.4f else 1f), size = 36.dp, iconSize = 20.dp, description = "Previous episode")
-                    Spacer(Modifier.width(8.dp))
-                    val n = m.next
-                    FlatIconButton(Icons.Rounded.SkipNext, { if (n != null) m.select(n.number) }, Modifier.alpha(if (n == null) 0.4f else 1f), size = 36.dp, iconSize = 20.dp, description = "Next episode")
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    FlatButton(
-                        label = if (m.loved) "Favorited" else "Favorite",
-                        modifier = Modifier.weight(1f),
-                        icon = if (m.loved) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        height = 42.dp, radius = 12.dp, fontSize = 13,
-                        padding = PaddingValues(horizontal = 8.dp),
-                        onClick = { m.toggle(Collection.FAVORITES) },
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    FlatButton(
-                        label = if (m.saved) "In watchlist" else "Watchlist",
-                        modifier = Modifier.weight(1f),
-                        icon = if (m.saved) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
-                        height = 42.dp, radius = 12.dp, fontSize = 13,
-                        padding = PaddingValues(horizontal = 8.dp),
-                        onClick = { m.toggle(Collection.LIST) },
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    FlatIconButton(Icons.Outlined.Info, { Nav.openInfo(m.animeId) }, size = 42.dp, radius = 12.dp, description = "Details")
-                }
-                Spacer(Modifier.height(22.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Episodes", Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                    FlatIconButton(Icons.Rounded.SwapVert, { m.reverse = !m.reverse }, size = 34.dp, iconSize = 18.dp, description = "Reverse order")
-                    Spacer(Modifier.width(8.dp))
-                    FlatIconButton(if (m.grid) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.GridView, { m.grid = !m.grid }, size = 34.dp, iconSize = 18.dp, description = if (m.grid) "List view" else "Grid view")
-                }
-                Spacer(Modifier.height(12.dp))
+        item(key = "dropdowns") {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Dropdown(
+                    icon = Icons.Outlined.ClosedCaption,
+                    label = if (m.isDub) "Dub" else "Sub",
+                    modifier = Modifier.weight(1f),
+                    onClick = onAudio,
+                )
+                Dropdown(
+                    icon = Icons.Rounded.Bolt,
+                    label = m.stream?.name ?: "Server",
+                    modifier = Modifier.weight(1f),
+                    onClick = onServers,
+                )
             }
+            Spacer(Modifier.height(14.dp))
         }
-
-        val err = m.epsError
-        if (err != null) {
-            item(key = "eps-error") { ErrorBox(err, onRetry = { m.loadEpisodes(force = true) }) }
-        } else if (e == null) {
-            items(2, key = { "skel-$it" }) {
-                Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    repeat(cols.coerceAtMost(6)) { Skel(Modifier.size(52.dp, 44.dp), radius = 12.dp) }
+        item(key = "pager") {
+            val p = m.prev
+            val n = m.next
+            Row(
+                Modifier.fillMaxWidth().height(50.dp).clip(shape16).border(1.dp, C.w(0.22f), shape16),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier.weight(1f).fillMaxHeight().alpha(if (p == null) 0.35f else 1f)
+                        .clickable(interactionSource = inter, indication = null, enabled = p != null) { if (p != null) m.select(p.number) }
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.ChevronLeft, null, Modifier.size(20.dp), tint = C.w(0.8f))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (p != null) "Ep ${p.number}" else "Ep", fontSize = 15.sp, color = C.w(0.7f), maxLines = 1)
+                }
+                Box(Modifier.width(1.dp).fillMaxHeight().background(C.w(0.22f)))
+                Row(
+                    Modifier.weight(1f).fillMaxHeight().clickable(interactionSource = inter, indication = null, onClick = onEpisodes),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, null, Modifier.size(22.dp), tint = Color.White)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Episodes", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                }
+                Box(Modifier.width(1.dp).fillMaxHeight().background(C.w(0.22f)))
+                Row(
+                    Modifier.weight(1f).fillMaxHeight().alpha(if (n == null) 0.35f else 1f)
+                        .clickable(interactionSource = inter, indication = null, enabled = n != null) { if (n != null) m.select(n.number) }
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    Text(if (n != null) "Ep ${n.number}" else "Ep", fontSize = 15.sp, color = C.w(0.7f), maxLines = 1)
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.Rounded.ChevronRight, null, Modifier.size(20.dp), tint = C.w(0.8f))
                 }
             }
-        } else if (list.isEmpty()) {
-            item(key = "eps-empty") { Text("No episodes are available yet.", color = C.w(0.6f), fontSize = 14.sp) }
-        } else if (m.grid) {
-            items(list.chunked(cols), key = { "row-${it.first().number}-${m.reverse}" }) { row ->
-                Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { x -> EpisodeCell(x, selected = x.number == m.ep) { m.select(x.number) } }
-                }
-            }
-        } else {
-            items(list, key = { "ep-${it.number}" }) { x ->
-                EpisodeRow(x, selected = x.number == m.ep, hasDub = dubSet.contains(x.number)) { m.select(x.number) }
-            }
+            Spacer(Modifier.height(18.dp))
         }
 
         if (a != null) {
-            item(key = "synopsis") {
+            item(key = "anime") {
                 val desc = ep?.description?.takeIf { it.isNotBlank() }
-                Column {
-                    Spacer(Modifier.height(22.dp))
-                    Panel {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (desc != null && m.synopsis) "Episode synopsis" else "Synopsis", Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                                if (desc != null) {
-                                    Text(
-                                        if (m.synopsis) "Show anime" else "Show episode",
-                                        Modifier.clickable(interactionSource = inter, indication = null) { m.synopsis = !m.synopsis },
-                                        fontSize = 12.sp, color = C.w(0.6f), textDecoration = TextDecoration.Underline,
-                                    )
+                val showEp = m.synopsis && desc != null
+                Panel(radius = 26.dp, padding = PaddingValues(14.dp)) {
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Poster(a.thumb, Modifier.width(80.dp), radius = 14.dp)
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(a.name, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    listOfNotNull(a.formatLabel, a.seasonYear?.toString()).joinToString(" · "),
+                                    fontSize = 14.sp, color = C.w(0.55f),
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Outlined.ClosedCaption, null, Modifier.size(17.dp), tint = C.w(0.6f))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("${e?.sub?.size ?: 0}", fontSize = 14.sp, color = C.w(0.65f))
+                                    Spacer(Modifier.width(14.dp))
+                                    Icon(Icons.Rounded.Mic, null, Modifier.size(17.dp), tint = C.w(0.6f))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("${e?.dub?.size ?: 0}", fontSize = 14.sp, color = C.w(0.65f))
                                 }
                             }
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SquareButton(
+                                    if (m.loved) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                    tint = if (m.loved) Color(0xFFEF4444) else Color.White, description = "Favorite",
+                                ) { m.toggle(Collection.FAVORITES) }
+                                SquareButton(
+                                    if (m.saved) Icons.Rounded.Check else Icons.Rounded.Add,
+                                    tint = Color.White, description = "Watchlist",
+                                ) { m.toggle(Collection.LIST) }
+                            }
+                        }
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            stripHtml(if (showEp) desc!! else (a.description ?: "")),
+                            fontSize = 14.sp, lineHeight = 22.sp, color = C.w(0.7f),
+                            maxLines = if (more) 40 else 2, overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                stripHtml(if (m.synopsis && desc != null) desc else (a.description ?: "")),
-                                fontSize = 13.5.sp, lineHeight = 20.sp, color = C.w(0.7f), maxLines = 8, overflow = TextOverflow.Ellipsis,
+                                if (showEp) "Episode synopsis" else "Synopsis",
+                                Modifier.weight(1f).clickable(interactionSource = inter, indication = null) { if (desc != null) m.synopsis = !m.synopsis },
+                                fontSize = 14.sp, color = C.w(0.6f),
                             )
+                            Row(
+                                Modifier.clickable(interactionSource = inter, indication = null) { more = !more },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(if (more) "Show less" else "Show more", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                                Spacer(Modifier.width(4.dp))
+                                Icon(if (more) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown, null, Modifier.size(20.dp), tint = Color.White)
+                            }
                         }
                     }
                 }
+                Spacer(Modifier.height(10.dp))
+                FlatButton("Anime details", Modifier.fillMaxWidth(), icon = Icons.Outlined.Info, height = 46.dp, radius = 14.dp, fontSize = 14) { Nav.openInfo(m.animeId) }
             }
         }
 
@@ -615,6 +642,48 @@ private fun WatchBody(m: WatchModel, modifier: Modifier, onServers: () -> Unit) 
                 }
             }
         }
+        item(key = "footer") {
+            Column(Modifier.padding(top = 28.dp)) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(C.w(0.12f)))
+                Spacer(Modifier.height(16.dp))
+                Text("Anime data from AniList. AniBiar does not host any video files.", fontSize = 12.sp, lineHeight = 18.sp, color = C.w(0.45f))
+            }
+        }
+    }
+}
+
+private fun prettyDate(raw: String): String? = try {
+    java.time.LocalDate.parse(raw.take(10)).format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy", java.util.Locale.ENGLISH))
+} catch (_: Exception) {
+    null
+}
+
+/** An outlined selector like the website's Sub / server dropdowns. */
+@Composable
+private fun Dropdown(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Row(
+        modifier.height(50.dp).clip(shape).border(1.dp, C.w(0.25f), shape)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(22.dp), tint = Color.White)
+        Spacer(Modifier.width(12.dp))
+        Text(label, Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(22.dp), tint = Color.White)
+    }
+}
+
+@Composable
+private fun SquareButton(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color, description: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(14.dp)
+    Box(
+        Modifier.size(44.dp).clip(shape).background(C.w(0.05f), shape).border(1.dp, C.w(0.25f), shape)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, description, Modifier.size(22.dp), tint = tint)
     }
 }
 
@@ -668,39 +737,141 @@ private fun EpisodeRow(x: WatchEpisode, selected: Boolean, hasDub: Boolean, onCl
     }
 }
 
-/** The server picker: a flat sheet that slides over the bottom of the page. */
+/** A bottom sheet with a grab handle that can always be closed: tap outside, press the X, or go back. */
+@Composable
+private fun SheetFrame(title: String, onClose: () -> Unit, trailing: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
+    val maxH = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.78f).dp
+    Box(Modifier.fillMaxSize().background(C.k(0.6f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose)) {
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = maxH)
+                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                .background(C.surface).border(1.dp, C.line, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                .blockTouches(),
+        ) {
+            Box(Modifier.padding(top = 10.dp).align(Alignment.CenterHorizontally).width(44.dp).height(5.dp).clip(RoundedCornerShape(99.dp)).background(C.w(0.3f)))
+            Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(title, Modifier.weight(1f), fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                trailing()
+                Spacer(Modifier.width(8.dp))
+                FlatIconButton(Icons.Rounded.Close, onClose, size = 36.dp, iconSize = 19.dp, description = "Close")
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(C.line))
+            Box(Modifier.weight(1f, fill = false)) { content() }
+        }
+    }
+}
+
+/** The server picker: a scrollable sheet. Servers with separate (soft) subtitles come first. */
 @Composable
 private fun ServerSheet(m: WatchModel, onClose: () -> Unit) {
     val streams = m.watch?.streams ?: emptyList()
     val current = m.stream?.name
-    Box(Modifier.fillMaxSize().background(C.k(0.6f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose)) {
-        Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                .background(C.surface).border(1.dp, C.line, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                .blockTouches().padding(start = 14.dp, end = 14.dp, top = 16.dp, bottom = 18.dp + navBarHeight()),
-        ) {
-            Text("Server", Modifier.padding(start = 4.dp, bottom = 10.dp), fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-            streams.forEach { s ->
+    SheetFrame("Server", onClose) {
+        LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 16.dp + navBarHeight())) {
+            item {
+                Text(
+                    "Soft subs are separate captions you can restyle. Hard subs are part of the picture.",
+                    Modifier.padding(horizontal = 6.dp, vertical = 8.dp), fontSize = 12.sp, lineHeight = 17.sp, color = C.w(0.5f),
+                )
+            }
+            items(streams, key = { it.id }) { s ->
+                val shape = RoundedCornerShape(14.dp)
                 Row(
-                    Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                        onClose()
-                        if (s.name != current) {
-                            m.serverName = s.name
-                            m.openStream(resume = false)
-                        }
-                    }.padding(horizontal = 6.dp, vertical = 12.dp),
+                    Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(shape)
+                        .background(if (s.name == current) C.w(0.10f) else Color.Transparent, shape)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                            onClose()
+                            if (s.name != current) {
+                                m.serverName = s.name
+                                m.openStream(resume = false)
+                            }
+                        }.padding(horizontal = 12.dp, vertical = 13.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(s.name, Modifier.weight(1f), fontSize = 15.sp, fontWeight = if (s.name == current) FontWeight.ExtraBold else FontWeight.SemiBold, color = Color.White)
                     Text(
-                        if (s.soft) "Soft subs" else "Hard subs",
-                        Modifier.clip(RoundedCornerShape(999.dp)).background(C.w(0.08f)).padding(horizontal = 8.dp, vertical = 3.dp),
-                        fontSize = 11.sp, color = C.w(0.7f),
+                        if (m.isDub) "English dub" else if (s.soft) "Soft subs" else "Hard subs",
+                        Modifier.clip(RoundedCornerShape(999.dp)).background(if (s.soft) C.w(0.14f) else C.w(0.06f)).padding(horizontal = 9.dp, vertical = 3.dp),
+                        fontSize = 11.sp, color = C.w(if (s.soft) 0.9f else 0.6f),
                     )
                     if (s.name == current) {
                         Spacer(Modifier.width(10.dp))
                         Icon(Icons.Rounded.Check, null, Modifier.size(20.dp), tint = Color.White)
                     }
+                }
+            }
+            if (streams.isEmpty()) item { Text("No servers yet…", Modifier.padding(16.dp), color = C.w(0.6f), fontSize = 14.sp) }
+        }
+    }
+}
+
+@Composable
+private fun AudioSheet(m: WatchModel, onClose: () -> Unit) {
+    val e = m.eps
+    val hasDub = e?.dub?.isNotEmpty() ?: false
+    val hasSub = e?.sub?.isNotEmpty() ?: false
+    SheetFrame("Audio", onClose) {
+        Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 16.dp + navBarHeight())) {
+            val rows = listOf(Triple(false, "Sub", hasSub), Triple(true, "Dub", hasDub))
+            rows.forEach { (dub, label, ok) ->
+                val shape = RoundedCornerShape(14.dp)
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(shape)
+                        .background(if (m.isDub == dub) C.w(0.10f) else Color.Transparent, shape)
+                        .alpha(if (ok) 1f else 0.4f)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                            onClose()
+                            if (!ok) Toasts.show(if (dub) "No English dub for this title yet." else "No subbed version found.")
+                            else if (dub != m.isDub) m.selectAudio(dub)
+                        }.padding(horizontal = 12.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(label, Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                    Text("${if (dub) e?.dub?.size ?: 0 else e?.sub?.size ?: 0} episodes", fontSize = 12.sp, color = C.w(0.55f))
+                    if (m.isDub == dub) {
+                        Spacer(Modifier.width(10.dp))
+                        Icon(Icons.Rounded.Check, null, Modifier.size(20.dp), tint = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The episode drawer: the list of every episode, as rows or as a number grid. */
+@Composable
+private fun EpisodeSheet(m: WatchModel, onClose: () -> Unit) {
+    val e = m.eps
+    val dubSet = remember(e) { e?.dub?.map { it.number }?.toSet() ?: emptySet() }
+    val list = if (m.reverse) m.list.asReversed() else m.list
+    val cols = ((screenWidth() - 28.dp + 8.dp) / 60.dp).toInt().coerceAtLeast(1)
+    val at = m.list.indexOfFirst { it.number == m.ep } + 1
+    SheetFrame(
+        title = "${m.name}  ${if (at > 0) "$at/${m.list.size}" else ""}",
+        onClose = onClose,
+        trailing = {
+            FlatIconButton(Icons.Rounded.SwapVert, { m.reverse = !m.reverse }, size = 36.dp, iconSize = 19.dp, description = "Reverse order")
+            Spacer(Modifier.width(8.dp))
+            FlatIconButton(if (m.grid) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.GridView, { m.grid = !m.grid }, size = 36.dp, iconSize = 19.dp, description = if (m.grid) "List view" else "Grid view")
+        },
+    ) {
+        LazyColumn(contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 16.dp + navBarHeight())) {
+            val err = m.epsError
+            if (err != null) {
+                item { ErrorBox(err, onRetry = { m.loadEpisodes(force = true) }) }
+            } else if (e == null) {
+                item { Text("Loading episodes…", color = C.w(0.6f), fontSize = 14.sp) }
+            } else if (list.isEmpty()) {
+                item { Text("No episodes are available yet.", color = C.w(0.6f), fontSize = 14.sp) }
+            } else if (m.grid) {
+                items(list.chunked(cols), key = { "row-${it.first().number}-${m.reverse}" }) { row ->
+                    Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { x -> EpisodeCell(x, selected = x.number == m.ep) { onClose(); m.select(x.number) } }
+                    }
+                }
+            } else {
+                items(list, key = { "ep-${it.number}" }) { x ->
+                    EpisodeRow(x, selected = x.number == m.ep, hasDub = dubSet.contains(x.number)) { onClose(); m.select(x.number) }
                 }
             }
         }

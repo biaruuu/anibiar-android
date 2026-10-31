@@ -77,14 +77,14 @@ private fun fillOf(k: Kind): Color = when (k) {
     Kind.Panel -> C.surface
     Kind.Nav -> Color(0xF2111113)
     Kind.Track -> Color(0xFF0E0E10)
-    Kind.Bar -> Color(0x8C000000)
+    Kind.Bar -> Color(0x4D6F86C9) // glass: a translucent blue-grey bubble
 }
 
 private fun borderOf(k: Kind): Color = when (k) {
     Kind.White -> Color(0xFFF2F3F5)
     Kind.Accent -> C.accent
     Kind.Danger -> C.red
-    Kind.Bar -> Color(0x1FFFFFFF)
+    Kind.Bar -> Color(0x66FFFFFF)
     else -> C.line
 }
 

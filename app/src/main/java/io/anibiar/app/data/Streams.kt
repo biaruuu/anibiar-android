@@ -391,8 +391,10 @@ object Streams {
                 if (intro == null) intro = r.intro
                 if (outro == null) outro = r.outro
             }
-            return WatchPayload(streams, intro, outro)
+            // soft-sub servers (separate captions) go first, then hard-sub ones; each keeps its own order
+            return WatchPayload(streams.sortedByDescending { it.soft }, intro, outro)
         }
+        var grace = false
 
         for (provider in order) {
             App.scope.launch {
@@ -410,7 +412,18 @@ object Streams {
                         results[provider] = r
                         val p = buildPayload()
                         watchMemory[key] = WatchMem(System.currentTimeMillis(), p)
-                        if (!done.isCompleted) done.complete(p) else onMore?.invoke(p)
+                        if (done.isCompleted) {
+                            onMore?.invoke(p)
+                        } else if (p.streams.any { it.soft }) {
+                            done.complete(p)
+                        } else if (!grace) {
+                            // only hard-sub so far: give a soft-sub server up to 1.5 s to answer before settling
+                            grace = true
+                            App.scope.launch {
+                                kotlinx.coroutines.delay(1_500)
+                                if (!done.isCompleted) done.complete(buildPayload())
+                            }
+                        }
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -418,7 +431,8 @@ object Streams {
                 } finally {
                     val left = synchronized(lock) { --pending }
                     if (left == 0 && !done.isCompleted) {
-                        done.completeExceptionally(ApiException("No playable stream was found for this episode. Try another episode or try again later."))
+                        if (results.isNotEmpty()) done.complete(buildPayload())
+                        else done.completeExceptionally(ApiException("No playable stream was found for this episode. Try another episode or try again later."))
                     }
                 }
             }
