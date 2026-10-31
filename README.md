@@ -1,7 +1,7 @@
 # AniBiar (Android, Kotlin)
 
 The AniBiar TV website as a native Android app: Kotlin, Jetpack Compose and the Media3 (ExoPlayer) video player.
-It talks to the same services as the website: AniList, the Anivexa streaming API, AniSkip, TMDB and your Supabase project
+It talks to the same services as the website: AniList, AniSkip, TMDB and your Supabase project
 (accounts, watch history, favorites, watchlist, avatar decorations).
 
 ## Get the app
@@ -18,7 +18,6 @@ Repo **Settings > Secrets and variables > Actions > Repository secrets > New rep
 | --- | --- |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | shared cache for episode lists (faster) |
 | `TMDB_KEY` | title logos and the artwork gallery |
-| `ANIVEXA_URL` | only if your streaming API is not `https://anibiartv-api.vercel.app` |
 
 A key inside an APK can be extracted by anyone who has the file: use a separate Upstash database for the app.
 After adding secrets, run **Actions > Build APK > Run workflow**.

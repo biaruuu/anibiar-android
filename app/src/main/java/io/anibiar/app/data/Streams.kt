@@ -2,6 +2,8 @@ package io.anibiar.app.data
 
 import io.anibiar.app.App
 import io.anibiar.app.core.Config
+import io.anibiar.app.prism.Prism
+import kotlinx.coroutines.withTimeoutOrNull
 import io.anibiar.app.core.Net
 import io.anibiar.app.core.arr
 import io.anibiar.app.core.bool
@@ -132,12 +134,10 @@ private fun nameFor(provider: String, server: String, taken: MutableSet<String>)
 }
 
 /**
- * Episodes and streams straight from the Anivexa API (the same one the website uses), intro / outro times from AniSkip.
+ * Episodes and streams from Prism, the engine built into the app, intro / outro times from AniSkip.
  * Stream links need a Referer header; the player sends it itself, so no proxy is needed.
  */
 object Streams {
-    private val base: String get() = Config.anivexaUrl
-
     private suspend fun getJson(url: String, timeoutMs: Long): JSONObject {
         val res = try {
             Net.get(url, mapOf("Accept" to "application/json", "User-Agent" to Net.UA), timeoutMs)
@@ -246,8 +246,8 @@ object Streams {
             App.scope.launch {
                 var failed = false
                 try {
-                    val raw = getJson("$base/episodes/$provider/$id?map=false", 25_000)
-                    raw.obj(provider)?.let { found[provider] = it }
+                    val raw = (withTimeoutOrNull(25_000) { Prism.episodes(provider, id) } ?: throw ApiException("Timed out"))
+                    found[provider] = raw
                     val p = build(order, found.toMap())
                     if (p != null) {
                         if (!done.isCompleted) done.complete(p)
@@ -307,9 +307,9 @@ object Streams {
             App.scope.launch {
                 var ok = false
                 try {
-                    val raw = getJson("$base/episodes/$provider/$animeId?map=false", 20_000)
+                    val raw = (withTimeoutOrNull(20_000) { Prism.episodes(provider, animeId) } ?: throw ApiException("Timed out"))
                     ok = true
-                    val has = raw.obj(provider)?.obj("episodes")?.arr("dub").objects().any { it.int("number") == episode }
+                    val has = raw.obj("episodes")?.arr("dub").objects().any { it.int("number") == episode }
                     if (has) result.complete(true)
                 } catch (e: CancellationException) {
                     throw e
@@ -405,7 +405,7 @@ object Streams {
                         synchronized(taken) { taken.add(v.source.name) }
                         ParsedWatch(listOf(v.source), v.intro, v.outro)
                     } else {
-                        val raw = getJson("$base/watch/$provider/$animeId/$audio/$provider-$episode", 25_000)
+                        val raw = (withTimeoutOrNull(25_000) { Prism.watch(provider, animeId, audio, episode) } ?: throw ApiException("Timed out"))
                         synchronized(taken) { parseWatch(provider, dub, raw, taken) }
                     }
                     if (r.streams.isNotEmpty()) {

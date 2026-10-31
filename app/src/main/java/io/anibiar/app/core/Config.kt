@@ -9,9 +9,6 @@ object Config {
     /** Your deployed AniBiar TV site. Only its cached AniList copy, the avatar decoration artwork and the library ping use it. */
     val siteUrl: String = BuildConfig.SITE_URL.trimEnd('/')
 
-    /** The streaming API the website uses (Anivexa). The app talks to it directly. */
-    val anivexaUrl: String = BuildConfig.ANIVEXA_URL.trimEnd('/')
-
     val supabaseUrl: String = BuildConfig.SUPABASE_URL.trimEnd('/')
     val supabaseKey: String = BuildConfig.SUPABASE_KEY
 
@@ -22,8 +19,8 @@ object Config {
     val tmdbKey: String = BuildConfig.TMDB_KEY
     val tmdbOn: Boolean get() = tmdbKey.isNotEmpty()
 
-    /** Providers to ask, in priority order. */
-    val providers = listOf("anikoto", "aniwaves", "animegg")
+    /** Prism sources to ask, in priority order. */
+    val providers = io.anibiar.app.prism.Prism.providers
 
     /** OAuth (Google / Discord) returns here. Must be in Supabase > Authentication > URL Configuration > Redirect URLs. */
     const val AUTH_REDIRECT = "io.anibiar.app://login-callback"

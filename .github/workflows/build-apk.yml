@@ -28,7 +28,6 @@ jobs:
         id: build
         env:
           SITE_URL: ${{ vars.SITE_URL }}
-          ANIVEXA_URL: ${{ secrets.ANIVEXA_URL || vars.ANIVEXA_URL }}
           UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
           TMDB_KEY: ${{ secrets.TMDB_KEY }}

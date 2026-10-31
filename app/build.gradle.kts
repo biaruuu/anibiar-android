@@ -20,7 +20,6 @@ android {
         versionName = "2.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
 
         buildConfigField("String", "SITE_URL", str(env("SITE_URL", "https://anibiartv.vercel.app")))
-        buildConfigField("String", "ANIVEXA_URL", str(env("ANIVEXA_URL", "https://anibiartv-api.vercel.app")))
         buildConfigField("String", "SUPABASE_URL", str(env("SUPABASE_URL", "https://zrlzsrakfzfayegvvisg.supabase.co")))
         buildConfigField("String", "SUPABASE_KEY", str(env("SUPABASE_KEY", "sb_publishable_PIaz0dn6UgqXTLwm80fBfw_hImeudBy")))
         buildConfigField("String", "UPSTASH_URL", str(env("UPSTASH_REDIS_REST_URL")))

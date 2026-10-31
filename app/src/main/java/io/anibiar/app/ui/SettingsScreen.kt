@@ -311,7 +311,7 @@ private fun ConnectionReport() {
         val sb = StringBuilder()
         sb.appendLine("AniBiar connection report")
         sb.appendLine("Site: ${Config.siteUrl}")
-        sb.appendLine("Streaming API: ${Config.anivexaUrl}")
+        sb.appendLine("Streaming engine: Prism (built in)")
         sb.appendLine("Upstash cache: ${if (Config.upstashOn) "on" else "off"}")
         sb.appendLine("Network stack: ${io.anibiar.app.core.Net.stackName}")
         sb.appendLine("TMDB logos: ${if (Config.tmdbOn) "on" else "off"}")
@@ -335,7 +335,9 @@ private fun ConnectionReport() {
             val body = "{\"query\":\"query { Page(page: 1, perPage: 1) { media(type: ANIME) { id } } }\"}"
             results.add(probe("AniList (direct)") { Net.postJson("https://graphql.anilist.co", body, mapOf("Accept" to "application/json"), 12_000).code })
             results.add(probe("Your site (AniList copy)") { Net.postJson("${Config.siteUrl}/api/anilist", body, timeoutMs = 12_000).code })
-            results.add(probe("Streaming API") { Net.get(Config.anivexaUrl, timeoutMs = 12_000).code })
+            results.add(probe("Prism: AniKoto") { Net.get("https://anikototv.to/", timeoutMs = 12_000).code })
+            results.add(probe("Prism: AniWaves") { Net.get("https://aniwaves.ru/", timeoutMs = 12_000).code })
+            results.add(probe("Prism: AnimeGG") { Net.get("https://www.animegg.org/", timeoutMs = 12_000).code })
             running = false
         }
     }
@@ -344,7 +346,7 @@ private fun ConnectionReport() {
     Panel(padding = PaddingValues(14.dp)) {
         Column(Modifier.fillMaxWidth()) {
             Setting("Site", Config.siteUrl)
-            Setting("Streaming API", Config.anivexaUrl)
+            Setting("Streaming engine", "Prism (built in)")
             Setting("Upstash cache", if (Config.upstashOn) "on" else "off")
             Setting("Network stack", io.anibiar.app.core.Net.stackName)
             Setting("TMDB logos", if (Config.tmdbOn) "on" else "off")

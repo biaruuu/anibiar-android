@@ -404,7 +404,7 @@ private fun SeekBar(state: PlayerState) {
     }
 }
 
-/** Captions drawn by us: white text with a dark outline, or on a dark box. */
+/** Captions drawn by us in the Crunchyroll look: bold white Trebuchet with a thick black outline (or a dark box). */
 @Composable
 private fun BoxScope.Captions(state: PlayerState, w: Float, controls: Boolean) {
     val raw = state.caption
@@ -419,8 +419,9 @@ private fun BoxScope.Captions(state: PlayerState, w: Float, controls: Boolean) {
         fontFamily = io.anibiar.app.ui.FontChoice.family(io.anibiar.app.ui.FontChoice.captionId),
         fontWeight = FontWeight.Bold,
         fontSize = size.sp,
-        lineHeight = (size * 1.3f).sp,
-        letterSpacing = 0.05.sp,
+        lineHeight = (size * 1.22f).sp,
+        letterSpacing = 0.sp,
+        shadow = androidx.compose.ui.graphics.Shadow(Color(0xB3000000), androidx.compose.ui.geometry.Offset(0f, 2f), 4f),
         textAlign = TextAlign.Center,
     )
     Box(
@@ -435,9 +436,9 @@ private fun BoxScope.Captions(state: PlayerState, w: Float, controls: Boolean) {
                 style = base.copy(color = Color.White),
             )
         } else {
-            val strokePx = with(LocalDensity.current) { (size * 0.2f).sp.toPx() }
+            val strokePx = with(LocalDensity.current) { (size * 0.26f).sp.toPx() }
             Box(Modifier.widthIn(max = (size * 52f).dp)) {
-                Text(text, style = base.copy(color = Color(0xEB000000), drawStyle = Stroke(width = strokePx, join = StrokeJoin.Round)))
+                Text(text, style = base.copy(color = Color.Black, shadow = null, drawStyle = Stroke(width = strokePx, join = StrokeJoin.Round)))
                 Text(text, style = base.copy(color = Color.White))
             }
         }

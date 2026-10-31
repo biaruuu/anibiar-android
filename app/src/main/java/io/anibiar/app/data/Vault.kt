@@ -155,11 +155,11 @@ object Vault {
 
     /* ------------------------------ the player's scripts ------------------------------ */
 
-    private class Scripts(val player: String?, val signing: String?)
+    internal class Scripts(val player: String?, val signing: String?)
 
     private val scriptCache = ConcurrentHashMap<String, String>()
 
-    private suspend fun fetchScripts(host: String, html: String, referer: String): Scripts = coroutineScope {
+    internal suspend fun fetchScripts(host: String, html: String, referer: String): Scripts = coroutineScope {
         val origin = "https://$host/"
         val urls = Regex("""<script[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE).findAll(html)
             .mapNotNull { m -> try { origin.toHttpUrl().resolve(m.groupValues[1])?.toString() } catch (_: Exception) { null } }
@@ -197,7 +197,7 @@ object Vault {
         }
 
     /** Every quoted string in the script (comments, regex literals and template strings skipped). */
-    private fun scriptStrings(s: String): List<String> {
+    internal fun scriptStrings(s: String): List<String> {
         val out = LinkedHashSet<String>()
         var i = 0
         var prev = ' '
@@ -275,7 +275,7 @@ object Vault {
         null
     }
 
-    private fun decrypt(value: String, script: String): String? {
+    internal fun decrypt(value: String, script: String): String? {
         val bytes = try { java.util.Base64.getUrlDecoder().decode(value) } catch (_: Exception) { return null }
         if (bytes.isEmpty() || bytes.size % 16 != 0) return null
         val sh = script.hashCode()
@@ -303,7 +303,7 @@ object Vault {
     private val keyCache = ConcurrentHashMap<Int, String>()
 
     /** The signing key is produced by a tiny string-decoder inside the site's script; it is run in a sandboxed JS engine. */
-    private fun signingKey(script: String): String? {
+    internal fun signingKey(script: String): String? {
         val sh = script.hashCode()
         keyCache[sh]?.let { return it }
         val objectName = Regex("""\blet\s+([A-Za-z_$][\w$]*)\s*;\s*!\s*function\s*\(\)\s*\{""").find(script)?.groupValues?.get(1) ?: return null
@@ -336,7 +336,7 @@ object Vault {
         return result?.also { keyCache[sh] = it }
     }
 
-    private fun sign(url: String, key: String?): String? {
+    internal fun sign(url: String, key: String?): String? {
         if (key == null || Regex("[?&]token=", RegexOption.IGNORE_CASE).containsMatchIn(url)) return url
         val m = Regex("""/([a-f0-9]{32})/([a-f0-9]{32})/""", RegexOption.IGNORE_CASE).find(url) ?: return url
         val pathKey = m.groupValues[1].lowercase() + "/" + m.groupValues[2].lowercase()
