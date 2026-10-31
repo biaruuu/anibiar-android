@@ -285,6 +285,47 @@ object Streams {
         return done.await()
     }
 
+    /** Episode counts (sub, dub) when this anime's episode list is already known (memory), otherwise null. */
+    fun counts(animeId: Int): Pair<Int, Int>? = memory[animeId]?.data?.let { it.sub.size to it.dub.size }
+
+    private val dubMemory = ConcurrentHashMap<String, Boolean>()
+
+    /**
+     * Does this episode have an English dub on any server? Every provider is asked at the same moment and the answer
+     * is "yes" as soon as one of them lists it, so a slow or sub-only provider never causes a wrong "no".
+     */
+    suspend fun hasDub(animeId: Int, episode: Int): Boolean {
+        val key = "$animeId:$episode"
+        dubMemory[key]?.let { return it }
+        memory[animeId]?.data?.dub?.let { list -> if (list.any { it.number == episode }) { dubMemory[key] = true; return true } }
+        val order = Config.providers
+        val result = CompletableDeferred<Boolean>()
+        val lock = Any()
+        var left = order.size
+        var answered = 0
+        for (provider in order) {
+            App.scope.launch {
+                var ok = false
+                try {
+                    val raw = getJson("$base/episodes/$provider/$animeId?map=false", 20_000)
+                    ok = true
+                    val has = raw.obj(provider)?.obj("episodes")?.arr("dub").objects().any { it.int("number") == episode }
+                    if (has) result.complete(true)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                } finally {
+                    val last = synchronized(lock) { if (ok) answered++; --left == 0 }
+                    if (last && !result.isCompleted) result.complete(false)
+                }
+            }
+        }
+        val r = result.await()
+        // a "no" is only remembered when at least one server really answered
+        if (r || synchronized(lock) { answered } > 0) dubMemory[key] = r
+        return r
+    }
+
     /* ----------------------------------- streams ----------------------------------- */
 
     private class WatchMem(val at: Long, val data: WatchPayload)

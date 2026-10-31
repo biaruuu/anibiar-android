@@ -56,7 +56,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -135,20 +137,61 @@ fun HomeScreen(onSearch: () -> Unit) {
     }
 
     val screenH = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp
-    val heroHeight = (screenH * 0.64f).coerceIn(400.dp, 560.dp)
+    val heroHeight = (screenH * 0.78f).coerceIn(460.dp, 700.dp)
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val heroPx = with(density) { heroHeight.toPx() }
+    val scroll = rememberScrollState()
+    val current = trending?.let { if (it.isEmpty()) null else it[hero.coerceIn(0, it.size - 1)] }
 
-    Column(Modifier.fillMaxSize().background(C.bg).verticalScroll(rememberScrollState())) {
-        Box {
+    Box(Modifier.fillMaxSize().background(C.bg)) {
+        // The hero picture stays put behind the page: it dims as you scroll, then disappears.
+        Box(
+            Modifier.fillMaxWidth().height(heroHeight + 90.dp).graphicsLayer {
+                val t = scroll.value / heroPx
+                alpha = if (t <= 1f) 1f - 0.8f * t else (0.2f - 0.2f * (t - 1f) / 0.9f).coerceAtLeast(0f)
+            },
+        ) {
+            if (current != null) {
+                Crossfade(targetState = current.id, animationSpec = tween(600), label = "heroBg") { id ->
+                    val m = trending?.firstOrNull { it.id == id } ?: current
+                    Img(m.cover ?: m.banner, Modifier.fillMaxSize())
+                }
+            }
+            Box(Modifier.fillMaxSize().background(C.k(0.30f)))
+            Box(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(heroHeight * 0.62f)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, C.bg.copy(alpha = 0.78f), C.bg))),
+            )
+        }
+        Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
             Hero(
                 items = trending,
                 error = trendingError,
                 index = hero,
                 height = heroHeight,
+                top = top,
                 onSelect = { hero = it },
                 onRetry = { trending = null; trendingTry++ },
             )
+            ContinueWatching(history) { historyTick++ }
+            Latest()
+            RankedPanel("Top Airing", C.green, top = true)
+            RankedPanel("Upcoming", C.orange, top = false)
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 28.dp)) {
+                HorizontalDivider(color = C.w(0.12f))
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    "AniBiar does not host any video files. Streams are provided by third-party servers.",
+                    Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 12.sp, lineHeight = 18.sp, color = C.w(0.45f),
+                )
+            }
+            Spacer(Modifier.height(96.dp + navBarHeight()))
+        }
+        // top bar: transparent over the hero, solid once the page has scrolled
+        Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)) {
+            Box(Modifier.matchParentSize().graphicsLayer { alpha = (scroll.value / (heroPx * 0.45f)).coerceIn(0f, 1f) }.background(C.bg))
             Row(
-                Modifier.fillMaxWidth().padding(top = top + 6.dp, start = 16.dp, end = 16.dp),
+                Modifier.fillMaxWidth().padding(top = top + 6.dp, bottom = 6.dp, start = 16.dp, end = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 androidx.compose.foundation.Image(painterResource(R.drawable.logo), "AniBiar TV", Modifier.height(30.dp), contentScale = ContentScale.Fit)
@@ -156,26 +199,14 @@ fun HomeScreen(onSearch: () -> Unit) {
                 FlatIconButton(Icons.Rounded.Search, onSearch, size = 40.dp, iconSize = 21.dp, description = "Search")
             }
         }
-        ContinueWatching(history) { historyTick++ }
-        Latest()
-        RankedPanel("Top Airing", C.green, top = true)
-        RankedPanel("Upcoming", C.orange, top = false)
-        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 28.dp)) {
-            HorizontalDivider(color = C.w(0.12f))
-            Spacer(Modifier.height(14.dp))
-            Text(
-                "AniBiar does not host any video files. Streams are provided by third-party servers.",
-                Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 12.sp, lineHeight = 18.sp, color = C.w(0.45f),
-            )
-        }
-        Spacer(Modifier.height(96.dp + navBarHeight()))
     }
 }
 
 /* ------------------------------------------- hero ------------------------------------------- */
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun Hero(items: List<Anime>?, error: String?, index: Int, height: Dp, onSelect: (Int) -> Unit, onRetry: () -> Unit) {
+private fun Hero(items: List<Anime>?, error: String?, index: Int, height: Dp, top: Dp, onSelect: (Int) -> Unit, onRetry: () -> Unit) {
     if (items == null) {
         Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(Modifier.size(28.dp), color = C.w(0.55f), strokeWidth = 2.5.dp)
@@ -183,7 +214,7 @@ private fun Hero(items: List<Anime>?, error: String?, index: Int, height: Dp, on
         return
     }
     if (items.isEmpty()) {
-        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 110.dp, bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxWidth().height(height).padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Text(error ?: "Couldn't load featured anime.", color = C.w(0.7f), textAlign = TextAlign.Center, fontSize = 14.sp)
             Spacer(Modifier.height(12.dp))
             FlatButton("Try again", height = 40.dp, onClick = onRetry)
@@ -197,47 +228,37 @@ private fun Hero(items: List<Anime>?, error: String?, index: Int, height: Dp, on
         if (a.seasonYear != null) add("${a.seasonYear}")
         addAll(a.genres.take(2))
     }
-    val w = screenWidth()
-    val narrow = w < 380.dp
-    val pad = if (narrow) 14.dp else 18.dp
-    Box(Modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)).background(C.surface)) {
-        // artwork under one flat dark layer so the text always reads
-        Crossfade(targetState = a.id, animationSpec = tween(500), label = "hero") { id ->
-            val m = items.firstOrNull { it.id == id } ?: a
-            Img(m.cover ?: m.banner, Modifier.fillMaxSize())
+    val narrow = screenWidth() < 380.dp
+    val pad = if (narrow) 16.dp else 20.dp
+    Column(Modifier.fillMaxWidth().height(height).padding(start = pad, end = pad, bottom = 22.dp), verticalArrangement = Arrangement.Bottom) {
+        TitleLogo(a)
+        Spacer(Modifier.height(12.dp))
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            chips.forEach { GlassChip(it, fontSize = if (narrow) 12 else 13) }
         }
-        Box(Modifier.fillMaxSize().background(C.k(0.55f)))
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = pad, end = pad, bottom = 18.dp)) {
-            TitleLogo(a)
-            Spacer(Modifier.height(10.dp))
-            ChipRow(gap = 8.dp) {
-                chips.forEach { c ->
-                    Box(Modifier.clip(RoundedCornerShape(99.dp)).background(C.k(0.45f)).border(1.dp, C.line, RoundedCornerShape(99.dp)).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                        Text(c, fontSize = if (narrow) 11.sp else 12.sp, color = C.w(0.9f), maxLines = 1)
-                    }
-                }
-            }
-            if (desc.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                Text(desc, fontSize = if (narrow) 13.sp else 14.sp, lineHeight = if (narrow) 19.sp else 20.sp, color = C.w(0.78f), maxLines = 3, overflow = TextOverflow.Ellipsis)
-            }
-            Spacer(Modifier.height(14.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                FlatButton("Watch Now", Modifier.weight(5f), icon = Icons.Rounded.PlayArrow, kind = Kind.White, height = 42.dp, radius = 10.dp, padding = PaddingValues(horizontal = 10.dp)) { Nav.openWatch(a.id, 1, false) }
-                Spacer(Modifier.width(8.dp))
-                FlatButton("Details", Modifier.weight(4f), icon = Icons.Outlined.Info, height = 42.dp, radius = 10.dp, padding = PaddingValues(horizontal = 10.dp)) { Nav.openInfo(a.id) }
-                Spacer(Modifier.width(8.dp))
-                AddButton(a)
-            }
-            if (items.size > 1) {
-                Spacer(Modifier.height(14.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    items.forEachIndexed { i, _ ->
-                        Box(
-                            Modifier.padding(vertical = 6.dp).height(5.dp).width(if (i == index) 22.dp else 5.dp)
-                                .clip(RoundedCornerShape(99.dp)).background(if (i == index) Color.White else C.w(0.35f)).noRipple { onSelect(i) },
-                        )
-                    }
+        if (desc.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Text(desc, fontSize = if (narrow) 13.sp else 14.sp, lineHeight = if (narrow) 19.sp else 21.sp, color = C.w(0.82f), maxLines = 3, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            FlatButton("Watch Now", Modifier.weight(5f), icon = Icons.Rounded.PlayArrow, kind = Kind.White, height = 44.dp, radius = 999.dp, padding = PaddingValues(horizontal = 10.dp)) { Nav.openWatch(a.id, 1, false) }
+            Spacer(Modifier.width(8.dp))
+            FlatButton("Details", Modifier.weight(4f), icon = Icons.Outlined.Info, height = 44.dp, radius = 999.dp, padding = PaddingValues(horizontal = 10.dp)) { Nav.openInfo(a.id) }
+            Spacer(Modifier.width(8.dp))
+            AddButton(a)
+        }
+        if (items.size > 1) {
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                items.forEachIndexed { i, _ ->
+                    Box(
+                        Modifier.padding(vertical = 6.dp).height(5.dp).width(if (i == index) 22.dp else 5.dp)
+                            .clip(RoundedCornerShape(99.dp)).background(if (i == index) Color.White else C.w(0.35f)).noRipple { onSelect(i) },
+                    )
                 }
             }
         }
@@ -282,7 +303,7 @@ private fun AddButton(a: Anime) {
                 Toasts.show(if (now) "Added to your watchlist" else "Removed from your watchlist")
             }
         },
-        size = 42.dp, radius = 10.dp, description = "Add to list",
+        size = 44.dp, radius = 999.dp, description = "Add to list",
     )
 }
 
@@ -347,14 +368,14 @@ private fun Latest() {
         val todo = list.filter { !dubCache.containsKey("${it.media.id}:${it.episode}") }
         if (todo.isEmpty()) return@LaunchedEffect
         pending = todo.size
-        val gate = Semaphore(3)
+        val gate = Semaphore(4)
         var left = todo.size
         coroutineScope {
             todo.map { it0 ->
                 async {
                     gate.withPermit {
                         val ok = try {
-                            Streams.episodes(it0.media.id).dub.any { e -> e.number == it0.episode }
+                            Streams.hasDub(it0.media.id, it0.episode)
                         } catch (e: CancellationException) {
                             throw e
                         } catch (_: Exception) {
@@ -375,24 +396,16 @@ private fun Latest() {
     val shown = items?.let { l -> if (dub && tick >= 0) l.filter { dubCache["${it.media.id}:${it.episode}"] == true } else l }
 
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 26.dp, bottom = 8.dp)) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val narrow = maxWidth < 380.dp
-            val controls: @Composable () -> Unit = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    FlatSwitch(dub, listOf(false to "Sub", true to "Dub"), onChange = { dub = it }, width = 92.dp, height = 30.dp, fontSize = 12)
-                    Spacer(Modifier.width(8.dp))
-                    Pager(page, last) { page = it }
-                }
-            }
-            if (narrow) {
-                Column {
-                    SectionTitle("Latest Episodes")
-                    Spacer(Modifier.height(10.dp))
-                    controls()
-                }
-            } else {
-                SectionTitle("Latest Episodes", trailing = controls)
-            }
+        val narrow = screenWidth() < 360.dp
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Latest Episodes", Modifier.weight(1f), fontSize = if (narrow) 15.sp else 18.sp, fontWeight = FontWeight.Bold,
+                color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.width(8.dp))
+            FlatSwitch(dub, listOf(false to "Sub", true to "Dub"), onChange = { dub = it }, width = if (narrow) 78.dp else 88.dp, height = 30.dp, fontSize = if (narrow) 11 else 12)
+            Spacer(Modifier.width(6.dp))
+            Pager(page, last) { page = it }
         }
         Spacer(Modifier.height(16.dp))
         if (dub && items != null) {
@@ -419,7 +432,7 @@ private fun Latest() {
             PosterGridSkeleton(12)
         } else {
             PosterGrid(shown, sidePadding = 32.dp) { it0 ->
-                EpisodeCard(it0, onClick = { if (dub) Nav.openWatch(it0.media.id, it0.episode, true) else Nav.openInfo(it0.media.id) })
+                EpisodeCard(it0, onClick = { if (dub) Nav.openWatch(it0.media.id, it0.episode, true) else Nav.openInfo(it0.media.id) }, dubCount = if (dubCache["${it0.media.id}:${it0.episode}"] == true) 1 else null)
             }
         }
     }
@@ -464,36 +477,68 @@ private fun RankedPanel(title: String, dot: Color, top: Boolean) {
         }
     }
 
-    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)) {
-        Panel(padding = PaddingValues(12.dp)) {
-            Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.ChevronRight, null, Modifier.size(22.dp), tint = Color.White)
-                    Spacer(Modifier.width(4.dp))
-                    Text(title.uppercase(), fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = Color.White)
+    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp)) {
+        Row(Modifier.padding(start = 2.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(22.dp), tint = Color.White)
+            Spacer(Modifier.width(2.dp))
+            Text(title.uppercase(), fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = Color.White)
+        }
+        val list = items
+        if (failed && list == null) {
+            Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Couldn't load this list.", Modifier.weight(1f), color = C.w(0.6f), fontSize = 14.sp)
+                FlatButton("Try again", height = 34.dp, fontSize = 12) { retry++ }
+            }
+        } else if (list == null) {
+            repeat(step) { Skel(Modifier.fillMaxWidth().padding(bottom = 10.dp).height(104.dp), radius = 16.dp) }
+        } else {
+            list.take(shown).forEach { a ->
+                RankedRow(a, dot)
+                Spacer(Modifier.height(10.dp))
+            }
+            if (list.size > step) {
+                Box(
+                    Modifier.fillMaxWidth().height(42.dp).clip(RoundedCornerShape(14.dp)).background(C.w(0.07f))
+                        .noRipple { shown = if (shown >= list.size) step else list.size },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(if (shown >= list.size) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown, null, tint = C.w(0.8f))
                 }
-                val list = items
-                if (failed && list == null) {
-                    Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Couldn't load this list.", Modifier.weight(1f), color = C.w(0.6f), fontSize = 14.sp)
-                        FlatButton("Try again", height = 34.dp, fontSize = 12) { retry++ }
-                    }
-                } else if (list == null) {
-                    repeat(step) { Skel(Modifier.fillMaxWidth().padding(bottom = 8.dp).height(96.dp)) }
-                } else {
-                    list.take(shown).forEach { a ->
-                        RankedRow(a, dot)
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    if (list.size > step) {
-                        Box(
-                            Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(12.dp)).background(C.w(0.05f))
-                                .noRipple { shown = if (shown >= list.size) step else list.size },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(if (shown >= list.size) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown, null, tint = C.w(0.8f))
-                        }
-                    }
+            }
+        }
+    }
+}
+
+/** A row with the anime's banner behind it (dimmed and fading toward the right), the poster on the left and glass badges. */
+@Composable
+private fun RankedRow(a: Anime, dot: Color) {
+    val eps = if (a.nextEpisode != null) a.nextEpisode - 1 else a.episodes
+    val shape = RoundedCornerShape(16.dp)
+    val grayscale = remember { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(0.15f) }) }
+    Box(Modifier.fillMaxWidth().height(104.dp).clip(shape).background(C.surface).border(1.dp, C.line, shape).noRipple { Nav.openInfo(a.id) }) {
+        val bg = a.banner ?: a.poster
+        if (bg != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current).data(bg).crossfade(150).build(),
+                contentDescription = null, contentScale = ContentScale.Crop, colorFilter = grayscale,
+                modifier = Modifier.matchParentSize(),
+            )
+        }
+        Box(Modifier.matchParentSize().background(Brush.horizontalGradient(listOf(C.bg.copy(alpha = 0.94f), C.bg.copy(alpha = 0.78f), C.bg.copy(alpha = 0.45f)))))
+        Row(Modifier.fillMaxSize().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Poster(a.thumb, Modifier.fillMaxHeight(), radius = 10.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Box(Modifier.padding(top = 6.dp, end = 7.dp).size(8.dp).clip(RoundedCornerShape(99.dp)).background(dot))
+                    Text(a.name, Modifier.weight(1f), fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(8.dp))
+                ChipRow(Modifier.padding(start = 15.dp)) {
+                    if (a.format != null) GlassMini(a.format.replace('_', ' '))
+                    if (a.seasonYear != null) GlassMini("${a.seasonYear}", icon = Icons.Rounded.CalendarToday)
+                    if (eps != null && eps > 0) GlassMini("$eps", icon = Icons.Rounded.ClosedCaption)
+                    if (a.averageScore != null) GlassMini("${a.averageScore}", icon = Icons.Rounded.Star)
                 }
             }
         }
@@ -501,26 +546,16 @@ private fun RankedPanel(title: String, dot: Color, top: Boolean) {
 }
 
 @Composable
-private fun RankedRow(a: Anime, dot: Color) {
-    val eps = if (a.nextEpisode != null) a.nextEpisode - 1 else a.episodes
+private fun GlassMini(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null) {
+    val shape = RoundedCornerShape(999.dp)
     Row(
-        Modifier.fillMaxWidth().height(96.dp).clip(RoundedCornerShape(12.dp)).background(C.raised).noRipple { Nav.openInfo(a.id) },
+        Modifier.clip(shape).background(C.w(0.12f), shape).border(1.dp, C.w(0.16f), shape).padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(64.dp).fillMaxHeight().background(C.w(0.1f))) { Img(a.thumb, Modifier.fillMaxSize()) }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f).padding(end = 12.dp), verticalArrangement = Arrangement.Center) {
-            Row(verticalAlignment = Alignment.Top) {
-                Box(Modifier.padding(top = 6.dp, end = 8.dp).size(8.dp).clip(RoundedCornerShape(99.dp)).background(dot))
-                Text(a.name, Modifier.weight(1f), fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            Spacer(Modifier.height(8.dp))
-            ChipRow(Modifier.padding(start = 16.dp)) {
-                if (a.format != null) Chip2(a.format.replace('_', ' '))
-                if (a.seasonYear != null) Chip2("${a.seasonYear}", icon = Icons.Rounded.CalendarToday)
-                if (eps != null && eps > 0) Chip2("$eps", icon = Icons.Rounded.ClosedCaption)
-                if (a.averageScore != null) Chip2("${a.averageScore}", icon = Icons.Rounded.Star)
-            }
+        if (icon != null) {
+            Icon(icon, null, Modifier.size(11.dp), tint = C.w(0.8f))
+            Spacer(Modifier.width(3.dp))
         }
+        Text(text, fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium, color = C.w(0.9f), maxLines = 1)
     }
 }

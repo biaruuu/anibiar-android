@@ -292,7 +292,13 @@ class PlayerState(context: Context) {
 
         val merged = LinkedHashMap(headers)
         subtitles.firstOrNull()?.headers?.forEach { (k, v) -> merged.putIfAbsent(k, v) }
-        val dataSource = OkHttpDataSource.Factory(Net.client).setDefaultRequestProperties(merged)
+        val engine = Net.cronet
+        val dataSource: androidx.media3.datasource.DataSource.Factory = if (engine != null) {
+            androidx.media3.datasource.cronet.CronetDataSource.Factory(engine, java.util.concurrent.Executors.newFixedThreadPool(4))
+                .setDefaultRequestProperties(merged)
+        } else {
+            OkHttpDataSource.Factory(Net.client).setDefaultRequestProperties(merged)
+        }
         val item = MediaItem.Builder().setUri(url).apply { if (hls) setMimeType(MimeTypes.APPLICATION_M3U8) }.build()
         val source = DefaultMediaSourceFactory(dataSource).createMediaSource(item)
 

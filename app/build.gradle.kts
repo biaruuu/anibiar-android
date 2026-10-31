@@ -14,7 +14,7 @@ android {
 
     defaultConfig {
         applicationId = "io.anibiar.app"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toIntOrNull() ?: 1
         versionName = "2.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
@@ -40,7 +40,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("anibiar")
         }
         debug {
@@ -91,5 +93,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-hls:$media3")
     implementation("androidx.media3:media3-datasource-okhttp:$media3")
+    implementation("androidx.media3:media3-datasource-cronet:$media3")
+    implementation("com.google.android.gms:play-services-cronet:18.1.0")
+    implementation("com.google.net.cronet:cronet-okhttp:0.1.0")
     implementation("androidx.media3:media3-ui:$media3")
 }

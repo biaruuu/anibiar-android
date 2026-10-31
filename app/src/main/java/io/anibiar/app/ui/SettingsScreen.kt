@@ -295,6 +295,7 @@ private fun ConnectionReport() {
         sb.appendLine("Site: ${Config.siteUrl}")
         sb.appendLine("Streaming API: ${Config.anivexaUrl}")
         sb.appendLine("Upstash cache: ${if (Config.upstashOn) "on" else "off"}")
+        sb.appendLine("Network stack: ${io.anibiar.app.core.Net.stackName}")
         sb.appendLine("TMDB logos: ${if (Config.tmdbOn) "on" else "off"}")
         if (results.isNotEmpty()) {
             sb.appendLine()
@@ -327,6 +328,7 @@ private fun ConnectionReport() {
             Setting("Site", Config.siteUrl)
             Setting("Streaming API", Config.anivexaUrl)
             Setting("Upstash cache", if (Config.upstashOn) "on" else "off")
+            Setting("Network stack", io.anibiar.app.core.Net.stackName)
             Setting("TMDB logos", if (Config.tmdbOn) "on" else "off")
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -1,0 +1,9 @@
+# Libraries ship their own consumer rules; these only silence optional references.
+-dontwarn org.chromium.net.**
+-dontwarn com.google.android.gms.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+-dontwarn javax.annotation.**
+-keep class io.anibiar.app.BuildConfig { *; }
+-keepclassmembers class * extends org.json.JSONObject { *; }

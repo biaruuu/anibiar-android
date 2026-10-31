@@ -32,7 +32,38 @@ class HttpResult(val code: Int, val body: String) {
 }
 
 object Net {
+    /**
+     * Chrome's network stack (Cronet) from Google Play services: HTTP/3 over QUIC, HTTP/2, Brotli and a disk cache.
+     * Null when this phone has no Play services, in which case plain OkHttp (HTTP/2) is used.
+     */
+    val cronet: org.chromium.net.CronetEngine? by lazy {
+        try {
+            val dir = java.io.File(io.anibiar.app.App.ctx.cacheDir, "cronet").apply { mkdirs() }
+            org.chromium.net.CronetEngine.Builder(io.anibiar.app.App.ctx)
+                .enableHttp2(true)
+                .enableQuic(true)
+                .enableBrotli(true)
+                .setStoragePath(dir.absolutePath)
+                .enableHttpCache(org.chromium.net.CronetEngine.Builder.HTTP_CACHE_DISK, 30L * 1024 * 1024)
+                .build()
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** What the connection report shows: which stack is carrying the requests. */
+    val stackName: String get() = if (cronet != null) "Cronet (HTTP/3 + HTTP/2)" else "OkHttp (HTTP/2)"
+
     val client: OkHttpClient = OkHttpClient.Builder()
+        .apply {
+            val engine = cronet
+            if (engine != null) {
+                try {
+                    addInterceptor(com.google.net.cronet.okhttptransportation.CronetInterceptor.newBuilder(engine).build())
+                } catch (_: Throwable) {
+                }
+            }
+        }
         .dispatcher(Dispatcher().apply { maxRequests = 64; maxRequestsPerHost = 16 })
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
@@ -83,13 +114,14 @@ object Net {
         val builder = Request.Builder().url(url).method(method, reqBody)
         for ((k, v) in headers) builder.header(k, v)
         val call = client.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build().newCall(builder.build())
+        var proto = ""
         val result = try {
-            call.await().use { res -> HttpResult(res.code, res.body?.string() ?: "") }
+            call.await().use { res -> proto = res.protocol.toString(); HttpResult(res.code, res.body?.string() ?: "") }
         } catch (e: IOException) {
             DebugLog.add("FAIL  ${System.currentTimeMillis() - started}ms  $method ${label(url)}  ${e.javaClass.simpleName}: ${e.message ?: ""}".take(200))
             throw e
         }
-        DebugLog.add("${result.code}  ${System.currentTimeMillis() - started}ms  $method ${label(url)}")
+        DebugLog.add("${result.code}  ${System.currentTimeMillis() - started}ms  $proto  $method ${label(url)}")
         return result
     }
 

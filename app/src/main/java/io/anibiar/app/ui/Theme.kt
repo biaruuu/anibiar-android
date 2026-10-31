@@ -4,13 +4,22 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.font.FontWeight
+import io.anibiar.app.R
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /** Discord "Onyx" dark theme, the same tokens as the website. Flat surfaces only: solid fills, hairline borders, no gradients. */
 object C {
@@ -39,8 +48,22 @@ object C {
     fun k(a: Float): Color = Color.Black.copy(alpha = a)
 }
 
+/** Inter (variable font, SIL OFL), the same typeface family as Miruro. */
+val Inter = FontFamily(
+    listOf(400, 500, 600, 700, 800, 900).map { w ->
+        Font(R.font.inter, FontWeight(w), variationSettings = FontVariation.Settings(FontVariation.weight(w)))
+    },
+)
+
 @Composable
 fun AniBiarTheme(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalTextStyle provides TextStyle(fontFamily = Inter, letterSpacing = (-0.1).sp)) {
+        ThemeBody(content)
+    }
+}
+
+@Composable
+private fun ThemeBody(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = C.fg,

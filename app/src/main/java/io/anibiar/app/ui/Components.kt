@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.ClosedCaption
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -315,28 +316,69 @@ fun Img(url: String?, modifier: Modifier = Modifier, fit: ContentScale = Content
     )
 }
 
-/** A card in the "Latest Episodes" grid. */
+/** A small translucent chip with an optional icon, like the badges under Miruro's cards. They wrap onto a second line when needed. */
 @Composable
-fun EpisodeCard(item: LatestEpisode, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun MiniChip(text: String, modifier: Modifier = Modifier, icon: ImageVector? = null, vicon: String? = null) {
+    val shape = RoundedCornerShape(7.dp)
+    Row(
+        modifier.clip(shape).background(C.w(0.08f), shape).padding(horizontal = 6.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(icon, null, Modifier.size(11.dp), tint = C.w(0.7f))
+            Spacer(Modifier.width(3.dp))
+        } else if (vicon != null) {
+            VIcon(vicon, size = 12.dp, tint = C.w(0.7f))
+            Spacer(Modifier.width(2.dp))
+        }
+        Text(text, fontSize = 10.5.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium, color = C.w(0.78f), maxLines = 1)
+    }
+}
+
+/** The glass bubble used on the hero (episodes, year, genres): translucent white with a light edge. */
+@Composable
+fun GlassChip(text: String, modifier: Modifier = Modifier, fontSize: Int = 13) {
+    val shape = RoundedCornerShape(999.dp)
+    Text(
+        text,
+        modifier.clip(shape).background(C.w(0.10f), shape).border(1.dp, C.w(0.18f), shape).padding(horizontal = 13.dp, vertical = 6.dp),
+        fontSize = fontSize.sp, lineHeight = (fontSize + 3).sp, color = C.w(0.92f), maxLines = 1,
+    )
+}
+
+/** A card in the "Latest Episodes" grid: poster with "EP 5 · 5h ago" on the picture, badges underneath that wrap. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun EpisodeCard(item: LatestEpisode, onClick: () -> Unit, modifier: Modifier = Modifier, dubCount: Int? = null) {
     val a = item.media
+    val shadow = androidx.compose.ui.graphics.Shadow(Color(0xCC000000), androidx.compose.ui.geometry.Offset(0f, 1f), 4f)
     Column(modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)) {
         Poster(a.thumb) {
+            // only a soft shade at the very bottom so the text reads on bright posters; no solid bar
+            Box(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(46.dp)
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))),
+            )
             Row(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xA6000000)).padding(horizontal = 8.dp, vertical = 5.dp),
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("EP ${item.episode}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
-                Text(timeAgo(item.airingAt), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                Text("EP ${item.episode}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, style = androidx.compose.ui.text.TextStyle(shadow = shadow))
+                Text(timeAgo(item.airingAt), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, style = androidx.compose.ui.text.TextStyle(shadow = shadow))
             }
         }
         Spacer(Modifier.height(8.dp))
-        ChipRow {
-            Chip2("${item.episode}", icon = Icons.Rounded.ClosedCaption)
-            Chip2(a.formatLabel)
-            if (a.seasonYear != null) Chip2("${a.seasonYear}")
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            MiniChip("${item.episode}", vicon = "closed_captions")
+            if (dubCount != null && dubCount > 0) MiniChip("$dubCount", icon = Icons.Rounded.Mic)
+            MiniChip(a.formatLabel)
+            if (a.seasonYear != null) MiniChip("${a.seasonYear}")
         }
         Spacer(Modifier.height(6.dp))
-        Text(a.name, fontSize = 12.5.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(a.name, fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
