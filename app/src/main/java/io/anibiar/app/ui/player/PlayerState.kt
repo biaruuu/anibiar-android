@@ -369,6 +369,7 @@ class PlayerState(context: Context) {
         setMenuView("clip")
     }
 
+    @JvmName("applyClipLength")
     fun setClipLength(seconds: Int) { clipLength = seconds.coerceIn(3, 60) }
 
     fun nudgeClipStart(delta: Double) {
