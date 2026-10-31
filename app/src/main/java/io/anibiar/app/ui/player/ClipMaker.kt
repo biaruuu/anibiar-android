@@ -14,12 +14,13 @@ import android.provider.MediaStore
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
-import android.util.Size
 import androidx.core.content.res.ResourcesCompat
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.Clock
+import androidx.media3.common.util.Size
+import androidx.media3.effect.TextureOverlay
 import androidx.media3.datasource.DataSource
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.OverlayEffect
@@ -162,6 +163,38 @@ object ClipMaker {
         }
     }
 
+    /**
+     * The asset loader that reads the stream with our headers. Its constructor has changed between Media3 versions, so the
+     * one this version has is looked up and filled in by parameter type.
+     */
+    private fun assetLoader(app: Context, sources: DefaultMediaSourceFactory): androidx.media3.transformer.AssetLoader.Factory {
+        val decoder = DefaultDecoderFactory.Builder(app).build()
+        val ctors = DefaultAssetLoaderFactory::class.java.constructors.sortedByDescending { it.parameterTypes.size }
+        for (c in ctors) {
+            val args = ArrayList<Any?>()
+            var ok = true
+            for (t in c.parameterTypes) {
+                val a: Any? = when {
+                    t == Context::class.java -> app
+                    t.isAssignableFrom(decoder.javaClass) && t.name.contains("DecoderFactory") -> decoder
+                    t == Clock::class.java -> Clock.DEFAULT
+                    t.isAssignableFrom(sources.javaClass) && t.name.contains("MediaSource") -> sources
+                    t == java.lang.Boolean.TYPE -> false
+                    t.name.contains("BitmapLoader") -> androidx.media3.datasource.DataSourceBitmapLoader(app)
+                    else -> { ok = false; null }
+                }
+                if (!ok) break
+                args.add(a)
+            }
+            if (!ok) continue
+            try {
+                return c.newInstance(*args.toTypedArray()) as androidx.media3.transformer.AssetLoader.Factory
+            } catch (_: Exception) {
+            }
+        }
+        throw IllegalStateException("This version can't open streams with headers")
+    }
+
     /** Makes the clip and returns where it was saved. Must be called on the main thread. */
     suspend fun make(ctx: Context, req: ClipRequest, onProgress: (Float) -> Unit): Uri {
         val source = if (req.hls) best(req.url, req.headers) else req.url
@@ -180,7 +213,7 @@ object ClipMaker {
                     .build(),
             ).build()
         val effects = ArrayList<Effect>()
-        if (req.cues.isNotEmpty()) effects.add(OverlayEffect(ImmutableList.of(Overlay(app, req))))
+        if (req.cues.isNotEmpty()) effects.add(OverlayEffect(ImmutableList.of<TextureOverlay>(Overlay(app, req))))
         val edited = EditedMediaItem.Builder(mediaItem).setEffects(Effects(emptyList(), effects)).build()
 
         val out = File(app.cacheDir, "clip-${System.currentTimeMillis()}.mp4")
@@ -188,7 +221,7 @@ object ClipMaker {
             .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(9_000_000).build())
             .setEnableFallback(true)
             .build()
-        val loader = DefaultAssetLoaderFactory(app, DefaultDecoderFactory.Builder(app).build(), Clock.DEFAULT, DefaultMediaSourceFactory(data))
+        val loader = assetLoader(app, DefaultMediaSourceFactory(data))
 
         suspendCancellableCoroutine { cont ->
             val transformer = Transformer.Builder(app)

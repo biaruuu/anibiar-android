@@ -12,3 +12,6 @@
 -dontwarn javax.script.**
 -dontwarn jdk.dynalink.**
 -keep class org.mozilla.javascript.** { *; }
+
+# the clip maker finds this constructor by reflection
+-keep class androidx.media3.transformer.DefaultAssetLoaderFactory { <init>(...); }
