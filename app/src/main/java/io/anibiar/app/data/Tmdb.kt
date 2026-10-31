@@ -87,6 +87,10 @@ object Tmdb {
         return url
     }
 
+    /** A wide background picture for the home hero (like Miruro's key art), or null. */
+    suspend fun backdrop(name: String, movie: Boolean): String? =
+        artwork(name, movie).firstOrNull { it.kind == "Backgrounds" }?.url?.replace("/w780/", "/w1280/")
+
     /** Backgrounds, posters and logos for the info page gallery. */
     suspend fun artwork(name: String, movie: Boolean): List<Artwork> {
         if (!enabled || name.isBlank()) return emptyList()

@@ -152,9 +152,13 @@ fun HomeScreen(onSearch: () -> Unit) {
             },
         ) {
             if (current != null) {
-                Crossfade(targetState = current.id, animationSpec = tween(600), label = "heroBg") { id ->
-                    val m = trending?.firstOrNull { it.id == id } ?: current
-                    Img(m.cover ?: m.banner, Modifier.fillMaxSize())
+                val wide by produceState<String?>(null, current.id) {
+                    value = null
+                    value = try { Tmdb.backdrop(current.title.english ?: current.title.romaji ?: current.name, current.format == "MOVIE") } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                }
+                val bgUrl = wide ?: current.banner ?: current.cover
+                Crossfade(targetState = bgUrl, animationSpec = tween(600), label = "heroBg") { u ->
+                    Img(u, Modifier.fillMaxSize())
                 }
             }
             Box(Modifier.fillMaxSize().background(C.k(0.30f)))
@@ -245,9 +249,9 @@ private fun Hero(items: List<Anime>?, error: String?, index: Int, height: Dp, to
         }
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            FlatButton("Watch Now", Modifier.weight(5f), icon = Icons.Rounded.PlayArrow, kind = Kind.White, height = 44.dp, radius = 999.dp, padding = PaddingValues(horizontal = 10.dp)) { Nav.openWatch(a.id, 1, false) }
+            FlatButton("Watch Now", Modifier.weight(5f), icon = Icons.Rounded.PlayArrow, kind = Kind.White, height = 46.dp, radius = 10.dp, padding = PaddingValues(horizontal = 10.dp)) { Nav.openWatch(a.id, 1, false) }
             Spacer(Modifier.width(8.dp))
-            FlatButton("Details", Modifier.weight(4f), icon = Icons.Outlined.Info, height = 44.dp, radius = 999.dp, padding = PaddingValues(horizontal = 10.dp)) { Nav.openInfo(a.id) }
+            FlatButton("Details", Modifier.weight(4f), icon = Icons.Outlined.Info, height = 46.dp, radius = 10.dp, padding = PaddingValues(horizontal = 10.dp)) { Nav.openInfo(a.id) }
             Spacer(Modifier.width(8.dp))
             AddButton(a)
         }
@@ -303,7 +307,7 @@ private fun AddButton(a: Anime) {
                 Toasts.show(if (now) "Added to your watchlist" else "Removed from your watchlist")
             }
         },
-        size = 44.dp, radius = 999.dp, description = "Add to list",
+        size = 46.dp, radius = 10.dp, description = "Add to list",
     )
 }
 
@@ -346,6 +350,7 @@ private fun Latest() {
     var dub by remember { mutableStateOf(false) }
     var pending by remember { mutableIntStateOf(0) }
     var dubTick by remember { mutableIntStateOf(0) }
+    val counts = remember { androidx.compose.runtime.mutableStateMapOf<Int, Pair<Int, Int>>() }
 
     LaunchedEffect(page, retry) {
         items = null
@@ -358,6 +363,29 @@ private fun Latest() {
             throw e
         } catch (e: Exception) {
             error = friendlyError(e)
+        }
+    }
+
+    // Episode counts (CC / mic badges), loaded quietly in the background three at a time.
+    LaunchedEffect(items) {
+        val list = items ?: return@LaunchedEffect
+        val gate = Semaphore(3)
+        coroutineScope {
+            list.forEach { it0 ->
+                launch {
+                    gate.withPermit {
+                        try {
+                            val e = Streams.episodes(it0.media.id)
+                            counts[it0.media.id] = e.sub.size to e.dub.size
+                            synchronized(dubCache) { dubCache["${it0.media.id}:${it0.episode}"] = e.dub.any { d -> d.number == it0.episode } }
+                            dubTick++
+                        } catch (ce: CancellationException) {
+                            throw ce
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -432,7 +460,7 @@ private fun Latest() {
             PosterGridSkeleton(12)
         } else {
             PosterGrid(shown, sidePadding = 32.dp) { it0 ->
-                EpisodeCard(it0, onClick = { if (dub) Nav.openWatch(it0.media.id, it0.episode, true) else Nav.openInfo(it0.media.id) }, dubCount = if (dubCache["${it0.media.id}:${it0.episode}"] == true) 1 else null)
+                EpisodeCard(it0, onClick = { if (dub) Nav.openWatch(it0.media.id, it0.episode, true) else Nav.openInfo(it0.media.id) }, subCount = counts[it0.media.id]?.first, dubCount = counts[it0.media.id]?.second)
             }
         }
     }
@@ -478,6 +506,8 @@ private fun RankedPanel(title: String, dot: Color, top: Boolean) {
     }
 
     Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp)) {
+      Panel(padding = PaddingValues(12.dp)) {
+       Column(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(start = 2.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.ChevronRight, null, Modifier.size(22.dp), tint = Color.White)
             Spacer(Modifier.width(2.dp))
@@ -506,6 +536,8 @@ private fun RankedPanel(title: String, dot: Color, top: Boolean) {
                 }
             }
         }
+       }
+      }
     }
 }
 
@@ -524,11 +556,11 @@ private fun RankedRow(a: Anime, dot: Color) {
                 modifier = Modifier.matchParentSize(),
             )
         }
-        Box(Modifier.matchParentSize().background(Brush.horizontalGradient(listOf(C.bg.copy(alpha = 0.94f), C.bg.copy(alpha = 0.78f), C.bg.copy(alpha = 0.45f)))))
-        Row(Modifier.fillMaxSize().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Poster(a.thumb, Modifier.fillMaxHeight(), radius = 10.dp)
+        Box(Modifier.matchParentSize().background(Brush.horizontalGradient(listOf(C.surface.copy(alpha = 0.92f), C.surface.copy(alpha = 0.7f), C.surface.copy(alpha = 0.25f)))))
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            Poster(a.thumb, Modifier.fillMaxHeight(), radius = 14.dp)
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+            Column(Modifier.weight(1f).padding(end = 10.dp), verticalArrangement = Arrangement.Center) {
                 Row(verticalAlignment = Alignment.Top) {
                     Box(Modifier.padding(top = 6.dp, end = 7.dp).size(8.dp).clip(RoundedCornerShape(99.dp)).background(dot))
                     Text(a.name, Modifier.weight(1f), fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -556,6 +588,6 @@ private fun GlassMini(text: String, icon: androidx.compose.ui.graphics.vector.Im
             Icon(icon, null, Modifier.size(11.dp), tint = C.w(0.8f))
             Spacer(Modifier.width(3.dp))
         }
-        Text(text, fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium, color = C.w(0.9f), maxLines = 1)
+        Text(text, fontSize = 10.5.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium, color = C.w(0.9f), maxLines = 1, softWrap = false)
     }
 }

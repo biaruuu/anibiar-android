@@ -336,6 +336,11 @@ object Streams {
      * Streams for one episode. Providers are asked at the same time; the first one with a playable stream is
      * returned right away and the others are added through [onMore] (so playback starts as early as possible).
      */
+    private class Flight(val job: Deferred<WatchPayload>, val more: CopyOnWriteArrayList<(WatchPayload) -> Unit>)
+
+    private val flights = HashMap<String, Flight>()
+
+    /** Asking twice for the same episode (a warm-up and the real call) shares one set of requests. */
     suspend fun watch(
         animeId: Int,
         dub: Boolean,
@@ -345,8 +350,27 @@ object Streams {
     ): WatchPayload {
         val key = "$animeId:${if (dub) "dub" else "sub"}:$episode:${providers.joinToString(",")}"
         val hit = watchMemory[key]
-        // stream links expire quickly, so they are only reused for a minute and a half
         if (hit != null && System.currentTimeMillis() - hit.at < 90_000) return hit.data
+        val flight = synchronized(flights) {
+            flights.getOrPut(key) {
+                val more = CopyOnWriteArrayList<(WatchPayload) -> Unit>()
+                val job = App.scope.async { watchNow(animeId, dub, episode, providers) { p -> more.forEach { it(p) } } }
+                job.invokeOnCompletion { synchronized(flights) { flights.remove(key) } }
+                Flight(job, more)
+            }
+        }
+        if (onMore != null) flight.more.add(onMore)
+        return flight.job.await()
+    }
+
+    private suspend fun watchNow(
+        animeId: Int,
+        dub: Boolean,
+        episode: Int,
+        providers: List<String>,
+        onMore: ((WatchPayload) -> Unit)?,
+    ): WatchPayload {
+        val key = "$animeId:${if (dub) "dub" else "sub"}:$episode:${providers.joinToString(",")}"
         val audio = if (dub) "dub" else "sub"
         val order = Config.providers.filter { providers.isEmpty() || providers.contains(it) }
         if (order.isEmpty()) throw ApiException("No server has this episode.")

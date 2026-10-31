@@ -87,7 +87,20 @@ private fun cleanCaption(s: String): String = s
  * The controls (inline and fullscreen) only draw this and call its methods. All calls must be made on the main thread.
  */
 class PlayerState(context: Context) {
-    val exo: ExoPlayer = ExoPlayer.Builder(context.applicationContext).build().apply {
+    val exo: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
+        // start playing after 0.8 s of video, keep up to a minute buffered, and begin with a fast-network guess
+        .setLoadControl(
+            androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(25_000, 60_000, 800, 2_000)
+                .setPrioritizeTimeOverSizeThresholds(true)
+                .build(),
+        )
+        .setBandwidthMeter(
+            androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(context.applicationContext)
+                .setInitialBitrateEstimate(6_000_000L)
+                .build(),
+        )
+        .build().apply {
         setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
         setHandleAudioBecomingNoisy(true)
         setWakeMode(C.WAKE_MODE_NETWORK)

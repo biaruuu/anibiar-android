@@ -160,7 +160,7 @@ fun VideoPlayer(
             },
         )
 
-        Captions(state, w)
+        Captions(state, w, controls = state.controlsVisible)
 
         // taps: show/hide controls; double tap: left third back, right third forward, middle fullscreen
         Box(
@@ -406,19 +406,20 @@ private fun SeekBar(state: PlayerState) {
 
 /** Captions drawn by us: white text with a dark outline, or on a dark box. */
 @Composable
-private fun BoxScope.Captions(state: PlayerState, w: Float) {
+private fun BoxScope.Captions(state: PlayerState, w: Float, controls: Boolean) {
     val raw = state.caption
     if (raw.isEmpty() || state.track < 0) return
     val text = raw.replace(Regex("<[^>]*>"), "").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").trim()
     if (text.isEmpty()) return
     // same sizing as the website: clamp(0.85rem, 2.6cqw, 2.5rem) times the chosen size
-    val size = cl(13.6f, w * 0.026f, 40f) * state.captionScale
-    val lift = cl(34f, w * 0.065f, 80f)
+    val size = cl(15f, w * 0.03f, 34f) * state.captionScale
+    // sits low on the picture; lifts a little only while the control bar is showing
+    val lift = if (controls) cl(52f, w * 0.1f, 100f) else cl(10f, w * 0.022f, 30f)
     val base = TextStyle(
         fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
+        fontWeight = FontWeight.SemiBold,
         fontSize = size.sp,
-        lineHeight = (size * 1.35f).sp,
+        lineHeight = (size * 1.3f).sp,
         letterSpacing = 0.05.sp,
         textAlign = TextAlign.Center,
     )

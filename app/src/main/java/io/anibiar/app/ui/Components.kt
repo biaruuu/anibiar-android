@@ -349,7 +349,7 @@ fun GlassChip(text: String, modifier: Modifier = Modifier, fontSize: Int = 13) {
 /** A card in the "Latest Episodes" grid: poster with "EP 5 · 5h ago" on the picture, badges underneath that wrap. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun EpisodeCard(item: LatestEpisode, onClick: () -> Unit, modifier: Modifier = Modifier, dubCount: Int? = null) {
+fun EpisodeCard(item: LatestEpisode, onClick: () -> Unit, modifier: Modifier = Modifier, subCount: Int? = null, dubCount: Int? = null) {
     val a = item.media
     val shadow = androidx.compose.ui.graphics.Shadow(Color(0xCC000000), androidx.compose.ui.geometry.Offset(0f, 1f), 4f)
     Column(modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)) {
@@ -363,8 +363,9 @@ fun EpisodeCard(item: LatestEpisode, onClick: () -> Unit, modifier: Modifier = M
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("EP ${item.episode}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, style = androidx.compose.ui.text.TextStyle(shadow = shadow))
-                Text(timeAgo(item.airingAt), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, style = androidx.compose.ui.text.TextStyle(shadow = shadow))
+                Text("EP ${item.episode}", Modifier.weight(1f, fill = false), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, style = androidx.compose.ui.text.TextStyle(shadow = shadow))
+                Spacer(Modifier.width(4.dp))
+                Text(timeAgo(item.airingAt), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, style = androidx.compose.ui.text.TextStyle(shadow = shadow))
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -372,7 +373,7 @@ fun EpisodeCard(item: LatestEpisode, onClick: () -> Unit, modifier: Modifier = M
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            MiniChip("${item.episode}", vicon = "closed_captions")
+            MiniChip("${if (subCount != null && subCount > 0) subCount else item.episode}", vicon = "closed_captions")
             if (dubCount != null && dubCount > 0) MiniChip("$dubCount", icon = Icons.Rounded.Mic)
             MiniChip(a.formatLabel)
             if (a.seasonYear != null) MiniChip("${a.seasonYear}")

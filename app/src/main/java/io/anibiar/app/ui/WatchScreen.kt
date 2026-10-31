@@ -185,6 +185,12 @@ private class WatchModel(
     fun loadEpisodes(force: Boolean = false) {
         eps = null
         epsError = null
+        // warm-up: ask the servers for the stream now, in parallel with the episode list
+        if (!force) {
+            val wantDub = isDub
+            val wantEp = ep
+            scope.launch { try { Streams.watch(animeId, wantDub, wantEp) } catch (ce: CancellationException) { throw ce } catch (_: Exception) {} }
+        }
         scope.launch {
             try {
                 val e = Streams.episodes(animeId, force) { more ->
@@ -216,7 +222,7 @@ private class WatchModel(
         backup = null
         scope.launch {
             try {
-                val w = Streams.watch(animeId, isDub, e.number, e.providers.toList()) { more ->
+                val w = Streams.watch(animeId, isDub, e.number) { more ->
                     // extra servers that answered later; the one that is playing stays selected
                     if (g == gen.get()) watch = more
                 }
