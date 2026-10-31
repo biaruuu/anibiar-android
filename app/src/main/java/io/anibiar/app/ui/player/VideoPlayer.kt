@@ -161,6 +161,7 @@ fun VideoPlayer(
         )
 
         Captions(state, w, controls = state.controlsVisible)
+        if (state.editorOpen) ClipEditor(state)
 
         // taps: show/hide controls; double tap: left third back, right third forward, middle fullscreen
         Box(
@@ -496,7 +497,6 @@ private fun Menu(state: PlayerState, w: Float, maxHeight: Float) {
                 "style" -> title = "Caption style"
                 "speed" -> title = "Speed"
                 "quality" -> title = "Quality"
-                "clip" -> title = "Save a clip"
             }
             Row(Modifier.fillMaxWidth().padding(start = 6.dp, top = 2.dp, end = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (view != "main") {
@@ -530,33 +530,6 @@ private fun Menu(state: PlayerState, w: Float, maxHeight: Float) {
                     MenuOpt("Outline", !state.captionBox, fs) { state.setCaptionStyle(box = false) }
                     MenuOpt("Dark box", state.captionBox, fs) { state.setCaptionStyle(box = true) }
                 }
-                "clip" -> {
-                    val ctx = androidx.compose.ui.platform.LocalContext.current
-                    fun t(v: Double): String { val s = v.toInt(); return "%d:%02d".format(s / 60, s % 60) }
-                    MenuRow("Starts at", t(state.clipStart), fs, chevron = false)
-                    Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("-5s" to -5.0, "+5s" to 5.0).forEach { (l, d) ->
-                            Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(C.w(0.07f)).tap { state.nudgeClipStart(d) }.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
-                                Text(l, color = Color.White, fontSize = fs.sp, fontWeight = FontWeight.Medium)
-                            }
-                        }
-                        Box(Modifier.weight(1.6f).clip(RoundedCornerShape(12.dp)).background(C.w(0.07f)).tap { state.useCurrentForClip() }.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
-                            Text("Use current time", color = Color.White, fontSize = fs.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                        }
-                    }
-                    MenuHead("Length", fs)
-                    listOf(10, 15, 30, 45, 60).forEach { sec ->
-                        MenuOpt(if (sec == 60) "1 minute" else "$sec seconds", state.clipLength == sec, fs) { state.setClipLength(sec) }
-                    }
-                    MenuHead("Saved with your caption style and the best quality", fs)
-                    if (state.clipBusy) {
-                        MenuRow("Saving\u2026", "${(state.clipProgress * 100).toInt()}%", fs, chevron = false)
-                        MenuRow("Cancel", "", fs, chevron = false) { state.cancelClip() }
-                    } else {
-                        MenuRow("Save to gallery", "", fs, chevron = false) { state.saveClip(ctx) }
-                    }
-                    state.clipMessage?.let { Text(it, Modifier.padding(start = 8.dp, top = 6.dp, end = 8.dp), color = C.w(0.75f), fontSize = (fs - 1f).sp) }
-                }
                 "speed" -> {
                     listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { s ->
                         MenuOpt(if (s == 1f) "Normal" else "${s}x", state.speed == s, fs) {
@@ -587,7 +560,7 @@ private fun Menu(state: PlayerState, w: Float, maxHeight: Float) {
                         onClick = if (state.tracks.isEmpty()) null else ({ state.setMenuView("captions") }),
                     )
                     if (state.tracks.isNotEmpty()) MenuRow("Caption style", "", fs, chevron = true) { state.setMenuView("style") }
-                    MenuRow("Save a clip", "up to 1 min", fs, chevron = true) { state.beginClip() }
+                    MenuRow("Save a clip", "up to 1 min", fs, chevron = true) { state.openEditor() }
                     MenuRow("Speed", if (state.speed == 1f) "Normal" else "${state.speed}x", fs, chevron = true) { state.setMenuView("speed") }
                     MenuRow("Autoplay", if (state.autoplay) "On" else "Off", fs, chevron = false) { state.setAutoplay(!state.autoplay) }
                     MenuRow(

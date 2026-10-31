@@ -23,6 +23,12 @@ import androidx.media3.common.util.Size
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.datasource.DataSource
 import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.Brightness
+import androidx.media3.effect.Contrast
+import androidx.media3.effect.FrameDropEffect
+import androidx.media3.effect.HslAdjustment
+import androidx.media3.effect.Presentation
+import androidx.media3.effect.RgbAdjustment
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.transformer.Composition
@@ -50,6 +56,19 @@ import kotlin.coroutines.resumeWithException
 
 class ClipCue(val start: Double, val end: Double, val text: String)
 
+enum class ClipFilter(val label: String) { None("Original"), Vivid("Vivid"), Warm("Warm"), Cool("Cool"), Mono("B&W"), Soft("Soft"), Cinema("Cinema") }
+
+/** The picture adjustments of a filter. The editor preview and the exported file use exactly the same effects. */
+fun filterEffects(f: ClipFilter): List<Effect> = when (f) {
+    ClipFilter.None -> emptyList()
+    ClipFilter.Vivid -> listOf(HslAdjustment.Builder().adjustSaturation(35f).build(), Contrast(0.12f))
+    ClipFilter.Warm -> listOf(RgbAdjustment.Builder().setRedScale(1.1f).setBlueScale(0.9f).build())
+    ClipFilter.Cool -> listOf(RgbAdjustment.Builder().setRedScale(0.92f).setBlueScale(1.1f).build())
+    ClipFilter.Mono -> listOf(HslAdjustment.Builder().adjustSaturation(-100f).build())
+    ClipFilter.Soft -> listOf(Contrast(-0.12f), Brightness(0.04f))
+    ClipFilter.Cinema -> listOf(Contrast(0.2f), HslAdjustment.Builder().adjustSaturation(-15f).build(), RgbAdjustment.Builder().setRedScale(1.04f).setBlueScale(0.96f).build())
+}
+
 class ClipRequest(
     val url: String,
     val hls: Boolean,
@@ -62,6 +81,18 @@ class ClipRequest(
     val box: Boolean,
     val fontId: String,
     val name: String,
+    val captionsOn: Boolean = true,
+    val filter: ClipFilter = ClipFilter.None,
+    /** Own text on the picture: where its centre is (0..1 of the frame), how big (share of the frame width) and its colour. */
+    val text: String = "",
+    val textX: Float = 0.5f,
+    val textY: Float = 0.2f,
+    val textSize: Float = 0.06f,
+    val textColor: Int = Color.WHITE,
+    /** Output height in pixels (0 = as the stream has it), frame rate (0 = as is) and video bitrate in Mbps. */
+    val height: Int = 0,
+    val fps: Int = 0,
+    val mbps: Int = 8,
 )
 
 /**
@@ -121,10 +152,10 @@ object ClipMaker {
 
         override fun getBitmap(presentationTimeUs: Long): Bitmap {
             val t = req.start + presentationTimeUs / 1_000_000.0
-            val text = req.cues.firstOrNull { t >= it.start && t <= it.end }?.let { clean(it.text) } ?: ""
+            val text = if (req.captionsOn) req.cues.firstOrNull { t >= it.start && t <= it.end }?.let { clean(it.text) } ?: "" else ""
             if (text == lastText) return lastBitmap
             lastText = text
-            lastBitmap = if (text.isEmpty()) empty else render(text)
+            lastBitmap = if (text.isEmpty() && req.text.isEmpty()) empty else render(text)
             return lastBitmap
         }
 
@@ -144,28 +175,51 @@ object ClipMaker {
             val maxW = (w * 0.86f).toInt()
             fun layout(p: TextPaint) = StaticLayout.Builder.obtain(text, 0, text.length, p, maxW)
                 .setAlignment(Layout.Alignment.ALIGN_CENTER).setLineSpacing(0f, 1.15f).build()
-            val fill = layout(paint(false))
-            val stroke = layout(paint(true))
-            val x = (w - maxW) / 2f
-            val y = h - h * 0.07f - fill.height
-            c.save()
-            c.translate(x, y)
-            if (req.box) {
-                val pad = px * 0.4f
-                val bg = Paint().apply { color = Color.argb(190, 0, 0, 0) }
-                c.drawRoundRect(-pad, -pad * 0.3f, maxW + pad, fill.height + pad * 0.3f, px * 0.35f, px * 0.35f, bg)
-            } else {
-                stroke.draw(c)
+            if (text.isNotEmpty()) {
+                val fill = layout(paint(false))
+                val stroke = layout(paint(true))
+                val x = (w - maxW) / 2f
+                val y = h - h * 0.07f - fill.height
+                c.save()
+                c.translate(x, y)
+                if (req.box) {
+                    val pad = px * 0.4f
+                    val bg = Paint().apply { color = Color.argb(190, 0, 0, 0) }
+                    c.drawRoundRect(-pad, -pad * 0.3f, maxW + pad, fill.height + pad * 0.3f, px * 0.35f, px * 0.35f, bg)
+                } else {
+                    stroke.draw(c)
+                }
+                fill.draw(c)
+                c.restore()
             }
-            fill.draw(c)
-            c.restore()
+            if (req.text.isNotEmpty()) {
+                val tpx = w * req.textSize
+                fun tp(stroke: Boolean) = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    typeface = face
+                    isFakeBoldText = req.fontId != "fira"
+                    textSize = tpx
+                    if (stroke) { style = Paint.Style.STROKE; strokeWidth = tpx * 0.2f; strokeJoin = Paint.Join.ROUND; color = Color.BLACK }
+                    else { style = Paint.Style.FILL; color = req.textColor }
+                }
+                val tw = (w * 0.9f).toInt()
+                fun tl(p: TextPaint) = StaticLayout.Builder.obtain(req.text, 0, req.text.length, p, tw)
+                    .setAlignment(Layout.Alignment.ALIGN_CENTER).setLineSpacing(0f, 1.1f).build()
+                val f = tl(tp(false))
+                val st = tl(tp(true))
+                c.save()
+                c.translate((req.textX * w - tw / 2f).coerceIn(0f, (w - tw).toFloat().coerceAtLeast(0f)), (req.textY * h - f.height / 2f).coerceIn(0f, (h - f.height).toFloat().coerceAtLeast(0f)))
+                st.draw(c)
+                f.draw(c)
+                c.restore()
+            }
             return bmp
         }
     }
 
     /**
      * The asset loader that reads the stream with our headers. Its constructor has changed between Media3 versions, so the
-     * one this version has is looked up and filled in by parameter type.
+     * one this version has is picked and filled in by parameter type (the real classes are compared, because release
+     * builds rename them).
      */
     private fun assetLoader(app: Context, sources: DefaultMediaSourceFactory): androidx.media3.transformer.AssetLoader.Factory {
         val decoder = DefaultDecoderFactory.Builder(app).build()
@@ -176,11 +230,11 @@ object ClipMaker {
             for (t in c.parameterTypes) {
                 val a: Any? = when {
                     t == Context::class.java -> app
-                    t.isAssignableFrom(decoder.javaClass) && t.name.contains("DecoderFactory") -> decoder
+                    t == androidx.media3.transformer.Codec.DecoderFactory::class.java -> decoder
                     t == Clock::class.java -> Clock.DEFAULT
-                    t.isAssignableFrom(sources.javaClass) && t.name.contains("MediaSource") -> sources
+                    t == androidx.media3.exoplayer.source.MediaSource.Factory::class.java -> sources
+                    t == androidx.media3.common.util.BitmapLoader::class.java -> androidx.media3.datasource.DataSourceBitmapLoader(app)
                     t == java.lang.Boolean.TYPE -> false
-                    t.name.contains("BitmapLoader") -> androidx.media3.datasource.DataSourceBitmapLoader(app)
                     else -> { ok = false; null }
                 }
                 if (!ok) break
@@ -192,19 +246,24 @@ object ClipMaker {
             } catch (_: Exception) {
             }
         }
-        throw IllegalStateException("This version can't open streams with headers")
+        throw IllegalStateException("Could not set up the video reader (${ctors.size} variants tried)")
+    }
+
+    /** Network access for a stream that needs its Referer and other headers. */
+    fun dataSource(headers: Map<String, String>): DataSource.Factory {
+        val engine = Net.cronet
+        return if (engine != null) {
+            androidx.media3.datasource.cronet.CronetDataSource.Factory(engine, sharedExecutor).setDefaultRequestProperties(headers)
+        } else {
+            androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(Net.client).setDefaultRequestProperties(headers)
+        }
     }
 
     /** Makes the clip and returns where it was saved. Must be called on the main thread. */
     suspend fun make(ctx: Context, req: ClipRequest, onProgress: (Float) -> Unit): Uri {
         val source = if (req.hls) best(req.url, req.headers) else req.url
         val app = ctx.applicationContext
-        val engine = Net.cronet
-        val data: DataSource.Factory = if (engine != null) {
-            androidx.media3.datasource.cronet.CronetDataSource.Factory(engine, java.util.concurrent.Executors.newFixedThreadPool(3)).setDefaultRequestProperties(req.headers)
-        } else {
-            androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(Net.client).setDefaultRequestProperties(req.headers)
-        }
+        val data = dataSource(req.headers)
         val mediaItem = MediaItem.Builder().setUri(source).apply { if (req.hls) setMimeType(MimeTypes.APPLICATION_M3U8) }
             .setClippingConfiguration(
                 MediaItem.ClippingConfiguration.Builder()
@@ -213,12 +272,15 @@ object ClipMaker {
                     .build(),
             ).build()
         val effects = ArrayList<Effect>()
-        if (req.cues.isNotEmpty()) effects.add(OverlayEffect(ImmutableList.of<TextureOverlay>(Overlay(app, req))))
+        effects.addAll(filterEffects(req.filter))
+        if (req.height > 0) effects.add(Presentation.createForHeight(req.height))
+        if (req.fps in 1..59) effects.add(FrameDropEffect.createDefaultFrameDropEffect(req.fps.toFloat()))
+        if ((req.captionsOn && req.cues.isNotEmpty()) || req.text.isNotEmpty()) effects.add(OverlayEffect(ImmutableList.of<TextureOverlay>(Overlay(app, req))))
         val edited = EditedMediaItem.Builder(mediaItem).setEffects(Effects(emptyList(), effects)).build()
 
         val out = File(app.cacheDir, "clip-${System.currentTimeMillis()}.mp4")
         val encoder = DefaultEncoderFactory.Builder(app)
-            .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(9_000_000).build())
+            .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(req.mbps.coerceIn(2, 40) * 1_000_000).build())
             .setEnableFallback(true)
             .build()
         val loader = assetLoader(app, DefaultMediaSourceFactory(data))

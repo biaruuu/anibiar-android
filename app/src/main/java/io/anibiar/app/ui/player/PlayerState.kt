@@ -87,7 +87,7 @@ private fun cleanCaption(s: String): String = s
  * Everything the player knows: the video (Media3 ExoPlayer), captions, quality, speed and intro/outro skipping.
  * The controls (inline and fullscreen) only draw this and call its methods. All calls must be made on the main thread.
  */
-private val sharedExecutor: java.util.concurrent.Executor by lazy { java.util.concurrent.Executors.newFixedThreadPool(4) }
+internal val sharedExecutor: java.util.concurrent.Executor by lazy { java.util.concurrent.Executors.newFixedThreadPool(4) }
 
 class PlayerState(context: Context) {
     val exo: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
@@ -346,68 +346,29 @@ class PlayerState(context: Context) {
         setTrack(pick)
     }
 
-    /* ---------------------------------- clips ---------------------------------- */
+    /* ---------------------------------- clip editor ---------------------------------- */
 
-    var clipStart by mutableDoubleStateOf(0.0)
+    var editorOpen by mutableStateOf(false)
         private set
-    var clipLength by mutableIntStateOf(15)
-        private set
-    var clipBusy by mutableStateOf(false)
-        private set
-    var clipProgress by mutableFloatStateOf(0f)
-        private set
-    var clipMessage by mutableStateOf<String?>(null)
-        private set
-    private var clipJob: Job? = null
     var clipTitle: String = "AniBiar"
 
-    /** The clip starts where the viewer is now. */
-    fun beginClip() {
-        clipStart = position
-        if (!clipBusy) clipMessage = null
+    fun openEditor() {
+        if (curUrl.isEmpty()) return
         exo.pause()
-        setMenuView("clip")
+        closeMenu()
+        editorOpen = true
     }
 
-    @JvmName("applyClipLength")
-    fun setClipLength(seconds: Int) { clipLength = seconds.coerceIn(3, 60) }
+    fun closeEditor() { editorOpen = false }
 
-    fun nudgeClipStart(delta: Double) {
-        clipStart = (clipStart + delta).coerceIn(0.0, (if (duration > 0) duration - 3 else clipStart + delta).coerceAtLeast(0.0))
-    }
-
-    fun useCurrentForClip() { clipStart = position }
-
-    fun saveClip(context: Context) {
-        if (clipBusy || released || curUrl.isEmpty()) return
-        val room = if (duration > 0) duration - clipStart else clipLength.toDouble()
-        val length = minOf(clipLength.toDouble(), room)
-        if (length < 2) { clipMessage = "Too close to the end for a clip."; return }
-        val req = ClipRequest(
-            url = curUrl, hls = curHls, headers = curHeaders, start = clipStart, length = length,
-            cues = cues.map { ClipCue(it.start, it.end, it.text) },
-            scale = captionScale, box = captionBox, fontId = io.anibiar.app.ui.FontChoice.captionId, name = clipTitle,
+    /** What the clip editor needs to know about the video that is playing now. */
+    fun clipSource(): ClipSource? {
+        if (curUrl.isEmpty()) return null
+        return ClipSource(
+            curUrl, curHls, curHeaders, cues.map { ClipCue(it.start, it.end, it.text) }, position, duration, clipTitle,
+            captionScale, captionBox, io.anibiar.app.ui.FontChoice.captionId, levels.firstOrNull()?.height ?: 0,
         )
-        clipBusy = true
-        clipProgress = 0f
-        clipMessage = null
-        clipJob = scope.launch {
-            try {
-                ClipMaker.make(context.applicationContext, req) { clipProgress = it }
-                clipMessage = "Saved to your gallery (Movies/AniBiar)."
-                android.widget.Toast.makeText(context.applicationContext, "Clip saved to your gallery", android.widget.Toast.LENGTH_LONG).show()
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                clipMessage = "Cancelled."
-                throw e
-            } catch (e: Throwable) {
-                clipMessage = "Could not save the clip: ${(e.message ?: e.javaClass.simpleName).take(120)}"
-            } finally {
-                clipBusy = false
-            }
-        }
     }
-
-    fun cancelClip() { clipJob?.cancel() }
 
     /* --------------------------------- quality --------------------------------- */
 
