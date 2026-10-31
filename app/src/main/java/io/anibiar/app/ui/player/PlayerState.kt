@@ -312,7 +312,6 @@ class PlayerState(context: Context) {
         val merged = LinkedHashMap(headers)
         subtitles.firstOrNull()?.headers?.forEach { (k, v) -> merged.putIfAbsent(k, v) }
         curUrl = url; curHls = hls; curHeaders = merged
-        clipMessage = null
         val engine = Net.cronet
         val dataSource: androidx.media3.datasource.DataSource.Factory = if (engine != null) {
             androidx.media3.datasource.cronet.CronetDataSource.Factory(engine, sharedExecutor)
