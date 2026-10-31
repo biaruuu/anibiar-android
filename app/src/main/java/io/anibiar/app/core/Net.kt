@@ -27,6 +27,8 @@ object DebugLog {
     }
 }
 
+class RawResult(val code: Int, val body: String, val setCookies: List<String>)
+
 class HttpResult(val code: Int, val body: String) {
     val ok: Boolean get() = code in 200..299
 }
@@ -127,6 +129,24 @@ object Net {
 
     suspend fun get(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Long = 15_000): HttpResult =
         request("GET", url, headers, null, timeoutMs = timeoutMs)
+
+    /** A GET that also returns the Set-Cookie headers, for sites that bind a session to cookies. */
+    suspend fun getRaw(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Long = 15_000): RawResult {
+        val started = System.currentTimeMillis()
+        val b = Request.Builder().url(url)
+        for ((k, v) in headers) b.header(k, v)
+        val call = client.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build().newCall(b.build())
+        return try {
+            call.await().use { res ->
+                val r = RawResult(res.code, res.body?.string() ?: "", res.headers("Set-Cookie"))
+                DebugLog.add("${res.code}  ${System.currentTimeMillis() - started}ms  ${res.protocol}  GET ${label(url)}")
+                r
+            }
+        } catch (e: IOException) {
+            DebugLog.add("FAIL  ${System.currentTimeMillis() - started}ms  GET ${label(url)}  ${e.javaClass.simpleName}: ${e.message ?: ""}".take(200))
+            throw e
+        }
+    }
 
     suspend fun postJson(url: String, json: String, headers: Map<String, String> = emptyMap(), timeoutMs: Long = 15_000): HttpResult =
         request("POST", url, headers, json, timeoutMs = timeoutMs)

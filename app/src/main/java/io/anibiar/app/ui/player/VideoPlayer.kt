@@ -404,9 +404,6 @@ private fun SeekBar(state: PlayerState) {
     }
 }
 
-/** Trebuchet MS is Microsoft's and not on Android, so the captions use Fira Sans, a similar humanist sans. */
-private val CaptionFont = FontFamily(androidx.compose.ui.text.font.Font(io.anibiar.app.R.font.caption_bold, FontWeight.Bold))
-
 /** Captions drawn by us: white text with a dark outline, or on a dark box. */
 @Composable
 private fun BoxScope.Captions(state: PlayerState, w: Float, controls: Boolean) {
@@ -419,7 +416,7 @@ private fun BoxScope.Captions(state: PlayerState, w: Float, controls: Boolean) {
     // sits low on the picture; lifts a little only while the control bar is showing
     val lift = if (controls) cl(46f, w * 0.09f, 90f) else cl(3f, w * 0.008f, 14f)
     val base = TextStyle(
-        fontFamily = CaptionFont,
+        fontFamily = io.anibiar.app.ui.FontChoice.family(io.anibiar.app.ui.FontChoice.captionId),
         fontWeight = FontWeight.Bold,
         fontSize = size.sp,
         lineHeight = (size * 1.3f).sp,
@@ -522,6 +519,10 @@ private fun Menu(state: PlayerState, w: Float, maxHeight: Float) {
                     MenuHead("Size", fs)
                     listOf("Small" to 0.88f, "Medium" to 1.1f, "Large" to 1.4f).forEach { (label, s) ->
                         MenuOpt(label, kotlin.math.abs(state.captionScale - s) < 0.01f, fs) { state.setCaptionStyle(scale = s) }
+                    }
+                    MenuHead("Font", fs)
+                    io.anibiar.app.ui.FontChoice.caption.forEach { (id, label) ->
+                        MenuOpt(label, io.anibiar.app.ui.FontChoice.captionId == id, fs) { io.anibiar.app.ui.FontChoice.chooseCaption(id) }
                     }
                     MenuHead("Style", fs)
                     MenuOpt("Outline", !state.captionBox, fs) { state.setCaptionStyle(box = false) }

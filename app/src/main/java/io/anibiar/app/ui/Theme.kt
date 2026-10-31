@@ -56,9 +56,39 @@ val Inter = FontFamily(
     },
 )
 
+/** Trebuchet MS (regular and italic files supplied by the owner of the app). Bold is drawn by the system from the regular weight. */
+val Trebuchet = FontFamily(
+    Font(R.font.trebuchet_regular, FontWeight.Normal),
+    Font(R.font.trebuchet_italic, FontWeight.Normal, androidx.compose.ui.text.font.FontStyle.Italic),
+)
+
+/** Fira Sans (SIL OFL). */
+val FiraSans = FontFamily(
+    Font(R.font.fira_regular, FontWeight.Normal),
+    Font(R.font.fira_medium, FontWeight.Medium),
+    Font(R.font.fira_semibold, FontWeight.SemiBold),
+    Font(R.font.caption_bold, FontWeight.Bold),
+)
+
+/** The fonts the person can pick, remembered on the phone. */
+object FontChoice {
+    val app = listOf("inter" to "Inter", "trebuchet" to "Trebuchet MS", "fira" to "Fira Sans")
+    val caption = listOf("trebuchet" to "Trebuchet MS", "fira" to "Fira Sans")
+
+    var appId by androidx.compose.runtime.mutableStateOf(io.anibiar.app.core.Prefs.getString("font.app") ?: "inter")
+        private set
+    var captionId by androidx.compose.runtime.mutableStateOf(io.anibiar.app.core.Prefs.getString("font.caption") ?: "trebuchet")
+        private set
+
+    fun family(id: String): FontFamily = when (id) { "trebuchet" -> Trebuchet; "fira" -> FiraSans; else -> Inter }
+
+    fun chooseApp(id: String) { appId = id; io.anibiar.app.core.Prefs.putString("font.app", id) }
+    fun chooseCaption(id: String) { captionId = id; io.anibiar.app.core.Prefs.putString("font.caption", id) }
+}
+
 @Composable
 fun AniBiarTheme(content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalTextStyle provides TextStyle(fontFamily = Inter, letterSpacing = (-0.1).sp)) {
+    CompositionLocalProvider(LocalTextStyle provides TextStyle(fontFamily = FontChoice.family(FontChoice.appId), letterSpacing = if (FontChoice.appId == "inter") (-0.1).sp else 0.sp)) {
         ThemeBody(content)
     }
 }

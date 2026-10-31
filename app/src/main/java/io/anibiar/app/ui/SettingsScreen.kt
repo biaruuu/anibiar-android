@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -89,6 +90,23 @@ fun SettingsScreen() {
             Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
                 Text("Settings", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
                 Spacer(Modifier.height(20.dp))
+
+                Caption("FONTS")
+                Panel(padding = PaddingValues(0.dp)) {
+                    Column(Modifier.fillMaxWidth()) {
+                        Text("App font", Modifier.padding(start = 16.dp, top = 14.dp, bottom = 4.dp), fontSize = 12.5.sp, color = C.w(0.55f))
+                        FontChoice.app.forEach { (id, label) ->
+                            FontRow(label, FontChoice.appId == id, FontChoice.family(id)) { FontChoice.chooseApp(id) }
+                        }
+                        Divider()
+                        Text("Subtitle font", Modifier.padding(start = 16.dp, top = 14.dp, bottom = 4.dp), fontSize = 12.5.sp, color = C.w(0.55f))
+                        FontChoice.caption.forEach { (id, label) ->
+                            FontRow(label, FontChoice.captionId == id, FontChoice.family(id)) { FontChoice.chooseCaption(id) }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
+                }
+                Spacer(Modifier.height(22.dp))
 
                 if (Auth.ready && !Auth.signedIn) {
                     Panel(padding = PaddingValues(22.dp)) {
@@ -363,6 +381,18 @@ private fun ConnectionReport() {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FontRow(label: String, selected: Boolean, family: androidx.compose.ui.text.font.FontFamily, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, Modifier.weight(1f), fontFamily = family, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Color.White)
+        if (selected) Icon(Icons.Rounded.Check, null, Modifier.size(20.dp), tint = Color.White)
     }
 }
 

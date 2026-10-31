@@ -11,6 +11,7 @@ import io.anibiar.app.core.obj
 import io.anibiar.app.core.objects
 import io.anibiar.app.core.parseObject
 import io.anibiar.app.core.str
+import io.anibiar.app.core.strings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
@@ -206,6 +207,17 @@ object AniList {
             jsonOf("status" to status),
         )
         return data.obj("Page")?.arr("media").objects().map { Anime.from(it) }
+    }
+
+    /** English, romaji and synonym titles of one anime (used to find it on sites that have no AniList ids). */
+    suspend fun titles(id: Int): List<String> {
+        val d = query(
+            "query (\$id: Int) { Media(id: \$id, type: ANIME) { title { romaji english } synonyms } }",
+            jsonOf("id" to id),
+        )
+        val m = d.obj("Media") ?: return emptyList()
+        val t = m.obj("title")
+        return (listOfNotNull(t?.str("english"), t?.str("romaji")) + m.arr("synonyms").strings()).filter { it.isNotBlank() }.distinct()
     }
 
     suspend fun topAiring() = ranked("RELEASING")

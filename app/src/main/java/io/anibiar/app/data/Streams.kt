@@ -373,7 +373,8 @@ object Streams {
         val key = "$animeId:${if (dub) "dub" else "sub"}:$episode:${providers.joinToString(",")}"
         val audio = if (dub) "dub" else "sub"
         // "aurora" is the server built into the app (Vault.kt); it is asked together with the others
-        val order = Config.providers.filter { providers.isEmpty() || providers.contains(it) } + Vault.NAME.lowercase()
+        val natives = listOf(Vault.NAME.lowercase(), Heaven.NAME.lowercase())
+        val order = Config.providers.filter { providers.isEmpty() || providers.contains(it) } + natives
         val taken = HashSet<String>()
         val results = ConcurrentHashMap<String, ParsedWatch>()
         val done = CompletableDeferred<WatchPayload>()
@@ -396,9 +397,10 @@ object Streams {
         for (provider in order) {
             App.scope.launch {
                 try {
-                    val r = if (provider == Vault.NAME.lowercase()) {
-                        val v = Vault.stream(animeId, episode, dub) ?: throw ApiException("Aurora has no stream for this episode.")
-                        synchronized(taken) { taken.add(Vault.NAME) }
+                    val r = if (provider in natives) {
+                        val v = (if (provider == Heaven.NAME.lowercase()) Heaven.stream(animeId, episode, dub) else Vault.stream(animeId, episode, dub))
+                            ?: throw ApiException("$provider has no stream for this episode.")
+                        synchronized(taken) { taken.add(v.source.name) }
                         ParsedWatch(listOf(v.source), v.intro, v.outro)
                     } else {
                         val raw = getJson("$base/watch/$provider/$animeId/$audio/$provider-$episode", 25_000)
