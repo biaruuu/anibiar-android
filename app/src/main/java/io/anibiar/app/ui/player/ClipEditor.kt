@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -70,8 +72,6 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
 import io.anibiar.app.ui.C
 import io.anibiar.app.ui.FontChoice
 import kotlinx.coroutines.Job
@@ -104,8 +104,16 @@ private fun clock(v: Double): String {
 
 /** All the editor's choices, kept together; the preview player lives here too. */
 @Stable
-private class Editor(ctx: Context, val src: ClipSource) {
-    val exo: ExoPlayer = ExoPlayer.Builder(ctx.applicationContext).build()
+private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
+    // a light preview player: a small buffer and at most 720p, so editing stays smooth (the saved clip is made from the best picture)
+    val exo: ExoPlayer = ExoPlayer.Builder(ctx.applicationContext)
+        .setLoadControl(
+            androidx.media3.exoplayer.DefaultLoadControl.Builder().setBufferDurationsMs(6_000, 16_000, 400, 1_200).build(),
+        ).build().apply {
+            trackSelectionParameters = trackSelectionParameters.buildUpon().setMaxVideoSize(1280, 720).build()
+            setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
+        }
+    private var lastSeek = 0L
     val duration: Double = if (src.duration > 0) src.duration else maxOf(src.position + 120.0, 180.0)
 
     var start by mutableDoubleStateOf(src.position.coerceIn(0.0, (duration - MIN_CLIP).coerceAtLeast(0.0)))
@@ -168,18 +176,32 @@ private class Editor(ctx: Context, val src: ClipSource) {
         exo.seekTo((v * 1000).toLong())
     }
 
+    /** Seeks while a finger is dragging: at most about five times a second, so the player isn't flooded. */
+    fun seekSoft(t: Double) {
+        val v = t.coerceIn(0.0, duration)
+        playhead = v
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastSeek > 200) {
+            lastSeek = now
+            exo.seekTo((v * 1000).toLong())
+        }
+    }
+
     fun moveStart(t: Double) {
         val v = t.coerceIn(0.0, end - MIN_CLIP)
         start = v
         if (end - v > MAX_CLIP) end = v + MAX_CLIP
-        seek(v)
+        seekSoft(v)
     }
 
     fun moveEnd(t: Double) {
         val v = t.coerceIn(start + MIN_CLIP, minOf(duration, start + MAX_CLIP))
         end = v
-        seek((v - 1.0).coerceAtLeast(start))
+        seekSoft((v - 1.0).coerceAtLeast(start))
     }
+
+    /** The finger was lifted: land exactly where the playhead is. */
+    fun settle() = seek(playhead)
 
     /** Heights the picture can have (never above what the stream has). */
     fun heightOptions(): List<Int> = heights.filter { videoHeight <= 0 || it <= videoHeight + 40 }.ifEmpty { listOf(heights.first()) }
@@ -194,29 +216,26 @@ private class Editor(ctx: Context, val src: ClipSource) {
         )
     }
 
-    fun release() { try { exo.release() } catch (_: Exception) {} }
+    override fun close() { try { exo.release() } catch (_: Exception) {} }
 }
 
 @Composable
 fun ClipEditor(state: PlayerState) {
-    val src = remember { state.clipSource() } ?: return
+    val src = state.editorSource ?: return
     val ctx = LocalContext.current
-    val ed = remember { Editor(ctx, src) }
+    // the editor lives in the player state, so turning the phone (which rebuilds the screen) doesn't restart it
+    val ed = (state.editorObj as? Editor) ?: Editor(ctx, src).also { state.editorObj = it }
     val scope = rememberCoroutineScope()
-    DisposableEffect(Unit) { onDispose { ed.release() } }
 
     // keeps the playhead moving and loops inside the chosen part
     LaunchedEffect(ed) {
         while (true) {
             val p = ed.exo.currentPosition / 1000.0
-            if (!ed.busy && ed.exo.isPlaying && p >= ed.end) ed.exo.seekTo((ed.start * 1000).toLong()) else ed.playhead = p
-            delay(80)
+            if (!ed.busy && ed.exo.isPlaying && p >= ed.end) ed.exo.seekTo((ed.start * 1000).toLong())
+            else if (ed.exo.isPlaying && kotlin.math.abs(p - ed.playhead) > 0.05) ed.playhead = p
+            delay(100)
         }
     }
-    LaunchedEffect(ed.filter) {
-        try { ed.exo.setVideoEffects(filterEffects(ed.filter)) } catch (_: Throwable) {}
-    }
-
     fun export() {
         if (ed.busy) return
         ed.exo.pause()
@@ -243,16 +262,36 @@ fun ClipEditor(state: PlayerState) {
         ed.job?.cancel()
         state.closeEditor()
     }
+    // the screen is leaving for good (not just turning): stop the preview player
+    DisposableEffect(state) { onDispose { if (!state.editorOpen) { ed.close(); state.editorObj = null } } }
 
     Dialog(onDismissRequest = { if (!ed.busy) close() }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
-        Column(Modifier.fillMaxSize().background(Color(0xFF0A0A0C)).statusBarsPadding().navigationBarsPadding()) {
-            TopBar(ed, onClose = { close() }, onExport = { export() })
-            // the picture
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Preview(ed) }
-            Transport(ed)
-            Timeline(ed)
-            Tools(ed)
-            ToolPanel(ed)
+        BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF0A0A0C)).statusBarsPadding().navigationBarsPadding()) {
+            if (maxWidth > maxHeight) {
+                // turned sideways: the picture on the left, the editing tools on the right
+                Row(Modifier.fillMaxSize()) {
+                    Column(Modifier.weight(1.15f).fillMaxSize()) {
+                        TopBar(ed, onClose = { close() }, onExport = { export() })
+                        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Preview(ed) }
+                        Transport(ed)
+                    }
+                    Column(Modifier.weight(1f).fillMaxSize().verticalScroll(rememberScrollState())) {
+                        Spacer(Modifier.height(10.dp))
+                        Timeline(ed)
+                        Tools(ed)
+                        ToolPanel(ed, Modifier.fillMaxWidth().height(190.dp))
+                    }
+                }
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    TopBar(ed, onClose = { close() }, onExport = { export() })
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Preview(ed) }
+                    Transport(ed)
+                    Timeline(ed)
+                    Tools(ed)
+                    ToolPanel(ed, Modifier.fillMaxWidth().height(170.dp))
+                }
+            }
         }
     }
     if (ed.busy || ed.message != null) Status(ed, onDone = { ed.message = null }, onCancel = { ed.job?.cancel() })
@@ -281,27 +320,49 @@ private fun Pill(label: String, onClick: () -> Unit) {
 
 private fun Modifier.tapBox(onClick: () -> Unit): Modifier = this.clickable(interactionSource = MutableInteractionSource(), indication = null, onClick = onClick)
 
+/** How a filter looks on the preview (the saved clip uses the matching Media3 effect). */
+private fun filterMatrix(f: ClipFilter): android.graphics.ColorMatrix? {
+    fun sat(v: Float) = android.graphics.ColorMatrix().apply { setSaturation(v) }
+    fun scale(r: Float, g: Float, b: Float) = android.graphics.ColorMatrix(floatArrayOf(r, 0f, 0f, 0f, 0f, 0f, g, 0f, 0f, 0f, 0f, 0f, b, 0f, 0f, 0f, 0f, 0f, 1f, 0f))
+    fun contrast(c: Float) = scale(c, c, c).also { it.postConcat(android.graphics.ColorMatrix(floatArrayOf(1f, 0f, 0f, 0f, (1 - c) * 128f, 0f, 1f, 0f, 0f, (1 - c) * 128f, 0f, 0f, 1f, 0f, (1 - c) * 128f, 0f, 0f, 0f, 1f, 0f))) }
+    return when (f) {
+        ClipFilter.None -> null
+        ClipFilter.Vivid -> sat(1.35f).also { it.postConcat(contrast(1.1f)) }
+        ClipFilter.Warm -> scale(1.1f, 1f, 0.9f)
+        ClipFilter.Cool -> scale(0.92f, 1f, 1.1f)
+        ClipFilter.Mono -> sat(0f)
+        ClipFilter.Soft -> contrast(0.9f)
+        ClipFilter.Cinema -> sat(0.85f).also { it.postConcat(contrast(1.15f)) }
+    }
+}
+
 /** The video with its captions and own text drawn over it (dragging the text moves it). */
 @Composable
 private fun Preview(ed: Editor) {
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val boxAspect = maxWidth / maxHeight
-        val m = if (ed.aspect > boxAspect) Modifier.fillMaxWidth().aspectRatio(ed.aspect) else Modifier.fillMaxSize().aspectRatio(ed.aspect)
+        if (maxWidth < 40.dp || maxHeight < 40.dp) return@BoxWithConstraints
+        val boxAspect = maxWidth.value / maxHeight.value
+        val m = if (ed.aspect > boxAspect) Modifier.fillMaxWidth().aspectRatio(ed.aspect) else Modifier.fillMaxHeight().aspectRatio(ed.aspect)
         BoxWithConstraints(m.background(Color.Black)) {
             val cw = maxWidth
             val density = LocalDensity.current
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
-                factory = { c ->
-                    PlayerView(c).apply {
-                        useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        player = ed.exo
-                    }
+                factory = { c -> android.view.TextureView(c).also { ed.exo.setVideoTextureView(it) } },
+                update = { tv ->
+                    val cm = filterMatrix(ed.filter)
+                    if (cm == null) tv.setLayerType(android.view.View.LAYER_TYPE_NONE, null)
+                    else tv.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, android.graphics.Paint().apply { colorFilter = android.graphics.ColorMatrixColorFilter(cm) })
                 },
+                onRelease = { tv -> try { ed.exo.clearVideoTextureView(tv) } catch (_: Exception) {} },
             )
             // captions in the chosen style
-            val cap = if (ed.captionsOn) ed.src.cues.firstOrNull { ed.playhead >= it.start && ed.playhead <= it.end }?.text?.replace(Regex("<[^>]*>"), "")?.replace(Regex("\\{[^}]*\\}"), "")?.trim() ?: "" else ""
+            val cap by remember(ed) {
+                derivedStateOf {
+                    if (!ed.captionsOn) "" else ed.src.cues.firstOrNull { ed.playhead >= it.start && ed.playhead <= it.end }?.text
+                        ?.replace(Regex("<[^>]*>"), "")?.replace(Regex("\\{[^}]*\\}"), "")?.trim() ?: ""
+                }
+            }
             if (cap.isNotEmpty()) {
                 val size = with(density) { (cw * 0.034f * (ed.scale / 0.88f)).toSp() }
                 val style = TextStyle(fontFamily = FontChoice.family(ed.fontId), fontWeight = FontWeight.Bold, fontSize = size, lineHeight = size * 1.2f, textAlign = TextAlign.Center)
@@ -372,7 +433,7 @@ private fun Timeline(ed: Editor) {
         Canvas(
             Modifier.fillMaxWidth().height(26.dp)
                 .pointerInput(ed) { detectTapGestures { o -> val t = o.x / size.width * ed.duration; ed.centerWindow(t); ed.seek(t) } }
-                .pointerInput(ed) { detectDragGestures { c, _ -> c.consume(); val t = c.position.x.coerceIn(0f, size.width.toFloat()) / size.width * ed.duration; ed.centerWindow(t); ed.seek(t) } },
+                .pointerInput(ed) { detectDragGestures { c, _ -> c.consume(); val t = c.position.x.coerceIn(0f, size.width.toFloat()) / size.width * ed.duration; ed.centerWindow(t); ed.seekSoft(t) } },
         ) {
             val y = size.height / 2
             drawRoundRect(Color(0x33FFFFFF), Offset(0f, y - 3.dp.toPx()), Size(size.width, 6.dp.toPx()), CornerRadius(3.dp.toPx()))
@@ -401,12 +462,12 @@ private fun Timeline(ed: Editor) {
                             val de = kotlin.math.abs(o.x - xe)
                             grab = if (ds <= reach && ds <= de) 1 else if (de <= reach) 2 else 3
                         },
-                        onDragEnd = { grab = 0 },
-                        onDragCancel = { grab = 0 },
+                        onDragEnd = { grab = 0; ed.settle() },
+                        onDragCancel = { grab = 0; ed.settle() },
                     ) { change, _ ->
                         change.consume()
                         val t = ed.windowStart + change.position.x.coerceIn(0f, size.width.toFloat()) / size.width * WINDOW
-                        when (grab) { 1 -> ed.moveStart(t); 2 -> ed.moveEnd(t); else -> ed.seek(t) }
+                        when (grab) { 1 -> ed.moveStart(t); 2 -> ed.moveEnd(t); else -> ed.seekSoft(t) }
                     }
                 },
         ) {
@@ -486,8 +547,8 @@ private fun StopSlider(options: List<String>, index: Int, onChange: (Int) -> Uni
 }
 
 @Composable
-private fun ToolPanel(ed: Editor) {
-    Column(Modifier.fillMaxWidth().height(170.dp).padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
+private fun ToolPanel(ed: Editor, modifier: Modifier) {
+    Column(modifier.padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
         when (ed.tool) {
             "captions" -> {
                 if (ed.src.cues.isEmpty()) {

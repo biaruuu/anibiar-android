@@ -312,6 +312,7 @@ class PlayerState(context: Context) {
         val merged = LinkedHashMap(headers)
         subtitles.firstOrNull()?.headers?.forEach { (k, v) -> merged.putIfAbsent(k, v) }
         curUrl = url; curHls = hls; curHeaders = merged
+        openArgs = arrayOf(url, hls, headers, subtitles, intro, outro, length)
         val engine = Net.cronet
         val dataSource: androidx.media3.datasource.DataSource.Factory = if (engine != null) {
             androidx.media3.datasource.cronet.CronetDataSource.Factory(engine, sharedExecutor)
@@ -350,15 +351,33 @@ class PlayerState(context: Context) {
     var editorOpen by mutableStateOf(false)
         private set
     var clipTitle: String = "AniBiar"
+    /** The clip editor's own state (kept here so it survives the screen being rebuilt, e.g. when the phone is turned). */
+    internal var editorObj: Any? = null
+    internal var editorSource: ClipSource? = null
+    private var resumeAt = 0.0
+    private var openArgs: Array<Any?>? = null
 
+    /** The main player is stopped while editing, so two video decoders never run at once. */
     fun openEditor() {
-        if (curUrl.isEmpty()) return
-        exo.pause()
+        if (curUrl.isEmpty() || editorOpen) return
+        editorSource = clipSource()
+        resumeAt = position
+        flush()
+        exo.stop()
+        exo.clearMediaItems()
         closeMenu()
         editorOpen = true
     }
 
-    fun closeEditor() { editorOpen = false }
+    fun closeEditor() {
+        if (!editorOpen) return
+        (editorObj as? AutoCloseable)?.close()
+        editorObj = null
+        editorOpen = false
+        val a = openArgs ?: return
+        @Suppress("UNCHECKED_CAST")
+        open(a[0] as String, a[1] as Boolean, a[2] as Map<String, String>, a[3] as List<StreamSubtitle>, resumeAt, a[4] as TimeRange?, a[5] as TimeRange?, a[6] as Double?)
+    }
 
     /** What the clip editor needs to know about the video that is playing now. */
     fun clipSource(): ClipSource? {
@@ -590,6 +609,8 @@ class PlayerState(context: Context) {
         if (released) return
         flush()
         released = true
+        (editorObj as? AutoCloseable)?.close()
+        editorObj = null
         scope.cancel()
         exo.removeListener(listener)
         exo.release()
