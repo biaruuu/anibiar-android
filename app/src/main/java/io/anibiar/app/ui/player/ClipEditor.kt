@@ -95,7 +95,7 @@ class ClipSource(
 
 private const val MAX_CLIP = 60.0
 private const val MIN_CLIP = 2.0
-private const val WINDOW = 120.0
+private const val WINDOW = 90.0
 
 private fun clock(v: Double): String {
     val s = v.toInt().coerceAtLeast(0)
@@ -122,7 +122,9 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
     var playhead by mutableDoubleStateOf(src.position)
     var playing by mutableStateOf(false)
     var aspect by mutableFloatStateOf(16f / 9f)
-    var videoHeight by mutableIntStateOf(src.sourceHeight)
+    /** The best picture height the stream offers (from the main player, not the small preview); 0 when unknown. */
+    val sourceHeight: Int = src.sourceHeight
+    var sourceFps by mutableFloatStateOf(0f)
 
     var tool by mutableStateOf("trim")
     var captionsOn by mutableStateOf(src.cues.isNotEmpty())
@@ -135,8 +137,8 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
     var textY by mutableFloatStateOf(0.18f)
     var textSize by mutableFloatStateOf(0.06f)
     var textColor by mutableIntStateOf(0xFFFFFFFF.toInt())
-    var resIndex by mutableIntStateOf(2)
-    var fpsIndex by mutableIntStateOf(1)
+    var resPick by mutableIntStateOf(-1) // -1 = the best the stream has
+    var fpsPick by mutableIntStateOf(0) // 0 = as the stream has it
     var rateIndex by mutableIntStateOf(1)
 
     var busy by mutableStateOf(false)
@@ -144,8 +146,6 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
     var message by mutableStateOf<String?>(null)
     var job: Job? = null
 
-    val heights = listOf(480, 720, 1080)
-    val fpsList = listOf(24, 30, 60)
     val rates = listOf("Low" to 3, "Recommended" to 8, "High" to 16)
 
     init {
@@ -160,8 +160,8 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
             override fun onVideoSizeChanged(v: androidx.media3.common.VideoSize) {
                 if (v.width > 0 && v.height > 0) {
                     aspect = (v.width * v.pixelWidthHeightRatio / v.height).let { if (it.isNaN() || it.isInfinite()) 16f / 9f else it.coerceIn(0.4f, 3f) }
-                    videoHeight = v.height
                 }
+                exo.videoFormat?.frameRate?.let { if (it > 0f) sourceFps = it }
             }
         })
     }
@@ -191,29 +191,68 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
         val v = t.coerceIn(0.0, end - MIN_CLIP)
         start = v
         if (end - v > MAX_CLIP) end = v + MAX_CLIP
+        ensureVisible()
         seekSoft(v)
     }
 
     fun moveEnd(t: Double) {
         val v = t.coerceIn(start + MIN_CLIP, minOf(duration, start + MAX_CLIP))
         end = v
+        ensureVisible()
         seekSoft((v - 1.0).coerceAtLeast(start))
     }
 
     /** The finger was lifted: land exactly where the playhead is. */
     fun settle() = seek(playhead)
 
-    /** Heights the picture can have (never above what the stream has). */
-    fun heightOptions(): List<Int> = heights.filter { videoHeight <= 0 || it <= videoHeight + 40 }.ifEmpty { listOf(heights.first()) }
+    /** Picture sizes to choose from: smaller ones, and on top the best the stream has (kept as it is, never stretched). */
+    fun resOptions(): List<Pair<String, Int>> {
+        if (sourceHeight <= 0) return listOf("480p" to 480, "720p" to 720, "Original" to 0)
+        val list = ArrayList<Pair<String, Int>>()
+        for (h in listOf(360, 480, 720, 1080, 1440)) if (h < sourceHeight - 8) list.add("${h}p" to h)
+        list.add("${sourceHeight}p" to 0)
+        return list
+    }
+
+    /** Frame rates up to what the stream has: a lower one drops frames, a higher one can't be invented. */
+    fun fpsOptions(): List<Pair<String, Int>> {
+        val list = ArrayList<Pair<String, Int>>()
+        list.add((if (sourceFps > 0f) "${Math.round(sourceFps)}" else "Original") to 0)
+        for (f in listOf(24, 30, 60)) if (sourceFps <= 0f || f < sourceFps - 0.5f) list.add("$f" to f)
+        return list.sortedBy { if (it.second == 0) Int.MAX_VALUE else it.second }
+    }
+
+    fun resSel(): Int = resOptions().let { if (resPick < 0) it.size - 1 else resPick.coerceIn(0, it.size - 1) }
+    fun fpsSel(): Int = fpsOptions().let { l -> if (fpsPick < 0) 0 else fpsPick.coerceIn(0, l.size - 1) }
 
     fun request(): ClipRequest {
-        val opts = heightOptions()
+        val res = resOptions()
+        val fpsO = fpsOptions()
         return ClipRequest(
             url = src.url, hls = src.hls, headers = src.headers, start = start, length = end - start, cues = src.cues,
             scale = scale, box = box, fontId = fontId, name = src.title, captionsOn = captionsOn && src.cues.isNotEmpty(),
             filter = filter, text = text.trim(), textX = textX, textY = textY, textSize = textSize, textColor = textColor,
-            height = opts[resIndex.coerceIn(0, opts.size - 1)], fps = fpsList[fpsIndex], mbps = rates[rateIndex].second,
+            height = res[resSel()].second, fps = fpsO[fpsSel()].second, mbps = rates[rateIndex].second,
         )
+    }
+
+    /** One tap lengths: the clip starts where it starts and lasts this long. */
+    fun setLength(seconds: Double) {
+        end = (start + seconds).coerceAtMost(duration)
+        if (end - start < MIN_CLIP) start = (end - MIN_CLIP).coerceAtLeast(0.0)
+        ensureVisible()
+        seek(start)
+        exo.play()
+    }
+
+    fun nudgeStart(d: Double) { moveStart(start + d); settle() }
+    fun nudgeEnd(d: Double) { moveEnd(end + d); settle() }
+
+    /** Keeps both handles inside the zoomed strip, scrolling it when one is pushed near an edge. */
+    fun ensureVisible() {
+        val max = (duration - WINDOW).coerceAtLeast(0.0)
+        if (start < windowStart + 3.0) windowStart = (start - 3.0).coerceIn(0.0, max)
+        else if (end > windowStart + WINDOW - 3.0) windowStart = (end - WINDOW + 3.0).coerceIn(0.0, max)
     }
 
     override fun close() { try { exo.release() } catch (_: Exception) {} }
@@ -302,8 +341,8 @@ private fun TopBar(ed: Editor, onClose: () -> Unit, onExport: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Pill("✕", onClick = onClose)
         Spacer(Modifier.weight(1f))
-        val opts = ed.heightOptions()
-        Pill("${opts[ed.resIndex.coerceIn(0, opts.size - 1)]}P ▾", onClick = { ed.tool = "export" })
+        val res = ed.resOptions()
+        Pill("${res[ed.resSel()].first.uppercase()} ▾", onClick = { ed.tool = "export" })
         Spacer(Modifier.width(10.dp))
         Box(Modifier.clip(RoundedCornerShape(999.dp)).background(Color.White).tapBox(onExport).padding(horizontal = 18.dp, vertical = 9.dp)) {
             Text("Export", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -451,7 +490,7 @@ private fun Timeline(ed: Editor) {
         // trim strip
         var grab by remember { mutableIntStateOf(0) } // 1 = start handle, 2 = end handle, 3 = playhead
         Canvas(
-            Modifier.fillMaxWidth().height(74.dp)
+            Modifier.fillMaxWidth().height(92.dp)
                 .pointerInput(ed) {
                     detectTapGestures { o -> ed.seek(ed.windowStart + o.x / size.width * WINDOW) }
                 }
@@ -460,7 +499,7 @@ private fun Timeline(ed: Editor) {
                         onDragStart = { o ->
                             val xs = ((ed.start - ed.windowStart) / WINDOW * size.width).toFloat()
                             val xe = ((ed.end - ed.windowStart) / WINDOW * size.width).toFloat()
-                            val reach = 30.dp.toPx()
+                            val reach = 40.dp.toPx()
                             val ds = kotlin.math.abs(o.x - xs)
                             val de = kotlin.math.abs(o.x - xe)
                             grab = if (ds <= reach && ds <= de) 1 else if (de <= reach) 2 else 3
@@ -535,6 +574,10 @@ private fun Label(text: String) {
 
 @Composable
 private fun StopSlider(options: List<String>, index: Int, onChange: (Int) -> Unit) {
+    if (options.size < 2) {
+        Text(options.firstOrNull() ?: "", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+        return
+    }
     Column {
         Slider(
             value = index.toFloat(), onValueChange = { onChange(Math.round(it).coerceIn(0, options.size - 1)) },
@@ -607,23 +650,33 @@ private fun ToolPanel(ed: Editor, modifier: Modifier) {
                 Text("The preview and the saved clip use the same filter.", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
             }
             "export" -> {
-                val hs = ed.heightOptions()
-                Row { Text("Resolution", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold); Spacer(Modifier.weight(1f)); Text("Higher is sharper, the file gets bigger", color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp) }
-                StopSlider(hs.map { "${it}p" }, ed.resIndex.coerceIn(0, hs.size - 1)) { ed.resIndex = it }
+                val res = ed.resOptions()
+                val fpsO = ed.fpsOptions()
+                Row { Text("Resolution", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold); Spacer(Modifier.weight(1f)); Text("Highest is the best the stream has", color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp) }
+                StopSlider(res.map { it.first }, ed.resSel()) { ed.resPick = it }
                 Text("Frame rate", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                StopSlider(ed.fpsList.map { "$it" }, ed.fpsIndex) { ed.fpsIndex = it }
+                StopSlider(fpsO.map { it.first }, ed.fpsSel()) { ed.fpsPick = it }
                 Text("Bitrate", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 StopSlider(ed.rates.map { it.first }, ed.rateIndex) { ed.rateIndex = it }
             }
             else -> {
-                Text("Trim", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text("Quick length (from the start handle)", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
-                Text("Drag the left and right white handles to pick the part you want (up to 1 minute). Drag the grey bar at the top to jump to another scene, or tap the strip to move the red playhead.", color = Color.White.copy(alpha = 0.65f), fontSize = 13.sp)
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip("Start here", false) { ed.moveStart(ed.playhead) }
-                    Chip("End here", false) { ed.moveEnd(ed.playhead) }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(10, 15, 30, 45, 60).forEach { sec -> Chip(if (sec == 60) "1 min" else "${sec}s", kotlin.math.abs((ed.end - ed.start) - sec) < 0.6) { ed.setLength(sec.toDouble()) } }
+                }
+                Label("SET FROM THE PLAYHEAD")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("Start here", false) { ed.moveStart(ed.playhead); ed.settle() }
+                    Chip("End here", false) { ed.moveEnd(ed.playhead); ed.settle() }
                     Chip("Play clip", false) { ed.seek(ed.start); ed.exo.play() }
+                }
+                Label("FINE TUNE")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("Start \u22121s", false) { ed.nudgeStart(-1.0) }
+                    Chip("Start +1s", false) { ed.nudgeStart(1.0) }
+                    Chip("End \u22121s", false) { ed.nudgeEnd(-1.0) }
+                    Chip("End +1s", false) { ed.nudgeEnd(1.0) }
                 }
             }
         }

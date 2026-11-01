@@ -17,18 +17,40 @@ object Web {
     /** At most this many site requests at the same time, so a burst of searches can't choke the phone or the network. */
     val gate = Semaphore(10)
 
-    suspend fun html(url: String, referer: String? = null, timeoutMs: Long = 15_000): String {
+    private class Bad(var fails: Int, var until: Long)
+    private val bad = java.util.concurrent.ConcurrentHashMap<String, Bad>()
+
+    private fun host(url: String) = try { java.net.URI(url).host ?: url } catch (_: Exception) { url }
+
+    /** A site that keeps timing out is left alone for two minutes, so it can't hold up the others. */
+    private suspend fun fetch(url: String, h: Map<String, String>, timeoutMs: Long): io.anibiar.app.core.HttpResult {
+        val host = host(url)
+        val b = bad[host]
+        if (b != null && b.until > System.currentTimeMillis()) throw PrismException("$host is not answering right now")
+        return try {
+            val r = fetch(url, h, timeoutMs)
+            bad.remove(host)
+            r
+        } catch (e: java.io.IOException) {
+            val x = bad.getOrPut(host) { Bad(0, 0) }
+            x.fails++
+            if (x.fails >= 2) { x.until = System.currentTimeMillis() + 120_000; x.fails = 0 }
+            throw e
+        }
+    }
+
+    suspend fun html(url: String, referer: String? = null, timeoutMs: Long = 9_000): String {
         val h = linkedMapOf("User-Agent" to UA, "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language" to "en-US,en;q=0.9")
         if (referer != null) h["Referer"] = referer
-        val r = gate.withPermit { Net.get(url, h, timeoutMs) }
+        val r = fetch(url, h, timeoutMs)
         if (!r.ok) throw PrismException("HTTP ${r.code} for ${url.substringAfter("://").substringBefore("?").take(60)}")
         return r.body
     }
 
-    suspend fun json(url: String, referer: String? = null, timeoutMs: Long = 15_000): JSONObject {
+    suspend fun json(url: String, referer: String? = null, timeoutMs: Long = 9_000): JSONObject {
         val h = linkedMapOf("User-Agent" to UA, "Accept" to "application/json, text/javascript, */*; q=0.01", "X-Requested-With" to "XMLHttpRequest")
         if (referer != null) h["Referer"] = referer
-        val r = gate.withPermit { Net.get(url, h, timeoutMs) }
+        val r = fetch(url, h, timeoutMs)
         if (!r.ok) throw PrismException("HTTP ${r.code} for ${url.substringAfter("://").substringBefore("?").take(60)}")
         return parseObject(r.body) ?: throw PrismException("Invalid answer from ${url.substringAfter("://").substringBefore("/")}")
     }
