@@ -224,8 +224,8 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
         for (f in listOf(24, 30)) if (sourceFps <= 0f || f < sourceFps - 0.5f) list.add("$f" to f)
         list.add((if (sourceFps > 0f) "${Math.round(sourceFps)}" else "Original") to 0)
         if (ClipMaker.smoothAvailable) {
-            list.add("Smooth 60" to -60)
-            list.add("Smooth 120" to -120)
+            list.add("Smooth\n60" to -60)
+            list.add("Smooth\n120" to -120)
         }
         return list
     }

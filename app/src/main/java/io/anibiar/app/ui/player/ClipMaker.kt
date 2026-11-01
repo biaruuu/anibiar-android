@@ -106,6 +106,7 @@ object ClipMaker {
     val smoothAvailable: Boolean by lazy {
         try {
             Class.forName("com.arthenica.ffmpegkit.FFmpegKit")
+            Class.forName("com.arthenica.smartexception.java.Exceptions")
             android.os.Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()
         } catch (_: Throwable) {
             false

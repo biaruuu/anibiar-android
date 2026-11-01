@@ -97,6 +97,7 @@ dependencies {
     implementation("androidx.media3:media3-effect:$media3")
     // frame interpolation for the "Smooth 60 / 120" clip option (LGPL build; the encoders are the phone's own)
     implementation("dev.ffmpegkit-maintained:ffmpeg-kit-min:6.0.3")
+    implementation("com.arthenica:smart-exception-java:0.2.1") // FFmpegKit needs it at run time
     implementation("androidx.media3:media3-common:$media3")
     implementation("com.google.android.gms:play-services-cronet:18.1.0")
     implementation("com.google.net.cronet:cronet-okhttp:0.1.0")
