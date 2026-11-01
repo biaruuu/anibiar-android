@@ -139,7 +139,7 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
     var textSize by mutableFloatStateOf(0.06f)
     var textColor by mutableIntStateOf(0xFFFFFFFF.toInt())
     var resPick by mutableIntStateOf(-1) // -1 = the best the stream has
-    var fpsPick by mutableIntStateOf(0) // 0 = as the stream has it
+    var fpsPick by mutableIntStateOf(-1) // -1 = as the stream has it
     var rateIndex by mutableIntStateOf(1)
 
     var busy by mutableStateOf(false)
@@ -215,16 +215,25 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
         return list
     }
 
-    /** Frame rates up to what the stream has: a lower one drops frames, a higher one can't be invented. */
+    /**
+     * Frame rates: the stream's own, lower ones (frames are dropped), and "Smooth" ones that compute in-between frames
+     * (negative codes). A plain 60 or 120 can't be made from a 24 fps stream without computing frames, so only Smooth offers it.
+     */
     fun fpsOptions(): List<Pair<String, Int>> {
         val list = ArrayList<Pair<String, Int>>()
+        for (f in listOf(24, 30)) if (sourceFps <= 0f || f < sourceFps - 0.5f) list.add("$f" to f)
         list.add((if (sourceFps > 0f) "${Math.round(sourceFps)}" else "Original") to 0)
-        for (f in listOf(24, 30, 60)) if (sourceFps <= 0f || f < sourceFps - 0.5f) list.add("$f" to f)
-        return list.sortedBy { if (it.second == 0) Int.MAX_VALUE else it.second }
+        if (ClipMaker.smoothAvailable) {
+            list.add("Smooth 60" to -60)
+            list.add("Smooth 120" to -120)
+        }
+        return list
     }
 
     fun resSel(): Int = resOptions().let { if (resPick < 0) it.size - 1 else resPick.coerceIn(0, it.size - 1) }
-    fun fpsSel(): Int = fpsOptions().let { l -> if (fpsPick < 0) 0 else fpsPick.coerceIn(0, l.size - 1) }
+    /** The chosen frame rate; the default is the stream's own. */
+    fun fpsSel(): Int = fpsOptions().let { l -> val d = l.indexOfFirst { it.second == 0 }; if (fpsPick < 0) d else fpsPick.coerceIn(0, l.size - 1) }
+    fun isSmooth(): Boolean = fpsOptions()[fpsSel()].second < 0
 
     fun request(): ClipRequest {
         val res = resOptions()
@@ -233,9 +242,14 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
             url = src.url, hls = src.hls, headers = src.headers, start = start, length = end - start, cues = src.cues,
             scale = scale, box = box, fontId = fontId, name = src.title, captionsOn = captionsOn && src.cues.isNotEmpty(),
             filter = filter, text = text.trim(), textX = textX, textY = textY, textSize = textSize, textColor = textColor,
-            height = res[resSel()].second, fps = fpsO[fpsSel()].second, mbps = rates[rateIndex].second,
+            height = smoothHeight(res[resSel()].second), fps = fpsO[fpsSel()].second.coerceAtLeast(0), mbps = rates[rateIndex].second,
+            smooth = (-fpsO[fpsSel()].second).coerceAtLeast(0),
         )
     }
+
+    /** Smoothing is heavy, so those clips are rendered at up to 720p. */
+    private fun smoothHeight(h: Int): Int =
+        if (!isSmooth()) h else if (h in 1..720) h else if (h == 0 && sourceHeight in 1..720) 0 else 720
 
     /** One tap lengths: the clip starts where it starts and lasts this long. */
     fun setLength(seconds: Double) {
@@ -284,6 +298,8 @@ fun ClipEditor(state: PlayerState) {
     // the editor lives in the player state, so turning the phone (which rebuilds the screen) doesn't restart it
     val ed = (state.editorObj as? Editor) ?: Editor(ctx, src).also { state.editorObj = it }
     val scope = rememberCoroutineScope()
+    val hostView = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(ed.busy) { hostView.keepScreenOn = ed.busy; onDispose { hostView.keepScreenOn = false } }
 
     // keeps the playhead moving and loops inside the chosen part
     LaunchedEffect(ed) {
@@ -691,6 +707,12 @@ private fun ToolPanel(ed: Editor, modifier: Modifier) {
                 StopSlider(res.map { it.first }, ed.resSel()) { ed.resPick = it }
                 Text("Frame rate", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 StopSlider(fpsO.map { it.first }, ed.fpsSel()) { ed.fpsPick = it }
+                if (ed.isSmooth()) {
+                    Text(
+                        "Smooth makes new in-between frames, so motion looks fluid. It is slow (a few minutes, longer for longer clips), renders at up to 720p, and fast action can look soft. Keep the app open while it works.",
+                        color = Color(0xFFFFD27A), fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp),
+                    )
+                }
                 Text("Bitrate", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 StopSlider(ed.rates.map { it.first }, ed.rateIndex) { ed.rateIndex = it }
             }

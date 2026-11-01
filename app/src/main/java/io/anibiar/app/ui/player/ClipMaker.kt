@@ -93,6 +93,8 @@ class ClipRequest(
     val height: Int = 0,
     val fps: Int = 0,
     val mbps: Int = 8,
+    /** 60 or 120 = compute in-between frames (slow, done after the clip is cut); 0 = off. */
+    val smooth: Int = 0,
 )
 
 /**
@@ -100,6 +102,51 @@ class ClipRequest(
  * with the subtitles drawn into the video in the font and style the viewer picked.
  */
 object ClipMaker {
+    /** Frame interpolation needs FFmpeg's native library; on phones that can't load it the option is simply not offered. */
+    val smoothAvailable: Boolean by lazy {
+        try {
+            Class.forName("com.arthenica.ffmpegkit.FFmpegKit")
+            android.os.Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Adds in-between frames to [input] (motion-compensated, with scene-change detection so cuts aren't blended) and
+     * writes [output] at [fps]. Tries the phone's H.264 encoder first, then a software one. [onProgress] gets 0..1.
+     */
+    private suspend fun smooth(input: File, output: File, fps: Int, length: Double, mbps: Int, onProgress: (Float) -> Unit) {
+        val filter = "minterpolate=fps=$fps:mi_mode=mci:mc_mode=obmc:me_mode=bidir:vsbmc=0:scd=fdiff"
+        val rate = mbps.coerceIn(4, 20)
+        val tries = listOf(
+            "-y -i ${input.absolutePath} -vf $filter -c:v h264_mediacodec -b:v ${rate}M -c:a copy -movflags +faststart ${output.absolutePath}",
+            "-y -i ${input.absolutePath} -vf $filter -c:v mpeg4 -q:v 3 -c:a copy -movflags +faststart ${output.absolutePath}",
+        )
+        var last = ""
+        for (cmd in tries) {
+            output.delete()
+            val ok = suspendCancellableCoroutine<Boolean> { cont ->
+                try {
+                    val session = com.arthenica.ffmpegkit.FFmpegKit.executeAsync(
+                        cmd,
+                        { s ->
+                            last = (s.failStackTrace ?: s.allLogsAsString ?: "").takeLast(300)
+                            if (cont.isActive) cont.resume(com.arthenica.ffmpegkit.ReturnCode.isSuccess(s.returnCode))
+                        },
+                        { },
+                        { st -> onProgress((st.time.toDouble() / (length * 1000.0)).coerceIn(0.0, 1.0).toFloat()) },
+                    )
+                    cont.invokeOnCancellation { try { com.arthenica.ffmpegkit.FFmpegKit.cancel(session.sessionId) } catch (_: Throwable) {} }
+                } catch (e: Throwable) {
+                    if (cont.isActive) cont.resumeWithException(e)
+                }
+            }
+            if (ok && output.exists() && output.length() > 0) return
+        }
+        throw IllegalStateException("Smoothing failed. ${last.trim()}".take(220))
+    }
+
     private val bandwidth = Regex("BANDWIDTH=(\\d+)")
 
     /** The best picture of an HLS stream: the highest-bitrate variant, when it can be played on its own. */
@@ -274,11 +321,12 @@ object ClipMaker {
         val effects = ArrayList<Effect>()
         effects.addAll(filterEffects(req.filter))
         if (req.height > 0) effects.add(Presentation.createForHeight(req.height))
-        if (req.fps in 1..59) effects.add(FrameDropEffect.createDefaultFrameDropEffect(req.fps.toFloat()))
+        if (!(req.smooth > 0) && req.fps in 1..59) effects.add(FrameDropEffect.createDefaultFrameDropEffect(req.fps.toFloat()))
         if ((req.captionsOn && req.cues.isNotEmpty()) || req.text.isNotEmpty()) effects.add(OverlayEffect(ImmutableList.of<TextureOverlay>(Overlay(app, req))))
         val edited = EditedMediaItem.Builder(mediaItem).setEffects(Effects(emptyList(), effects)).build()
 
         val out = File(app.cacheDir, "clip-${System.currentTimeMillis()}.mp4")
+        val smoothing = req.smooth > 0 && smoothAvailable
         val encoder = DefaultEncoderFactory.Builder(app)
             .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(req.mbps.coerceIn(2, 40) * 1_000_000).build())
             .setEnableFallback(true)
@@ -306,10 +354,19 @@ object ClipMaker {
             val holder = ProgressHolder()
             io.anibiar.app.App.scope.launch(Dispatchers.Main) {
                 while (cont.isActive) {
-                    if (transformer.getProgress(holder) == Transformer.PROGRESS_STATE_AVAILABLE) onProgress(holder.progress / 100f)
+                    if (transformer.getProgress(holder) == Transformer.PROGRESS_STATE_AVAILABLE) onProgress(holder.progress / 100f * (if (smoothing) 0.25f else 1f))
                     delay(300)
                 }
             }
+        }
+        if (smoothing) {
+            val smoothed = File(app.cacheDir, "clip-smooth-${System.currentTimeMillis()}.mp4")
+            try {
+                withContext(Dispatchers.IO) { smooth(out, smoothed, req.smooth, req.length, req.mbps, { onProgress(0.25f + it * 0.75f) }) }
+            } finally {
+                out.delete()
+            }
+            return withContext(Dispatchers.IO) { saveToGallery(app, smoothed, req.name) }
         }
         return withContext(Dispatchers.IO) { saveToGallery(app, out, req.name) }
     }

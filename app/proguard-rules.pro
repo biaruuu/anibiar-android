@@ -15,3 +15,8 @@
 
 # the clip maker finds this constructor by reflection
 -keep class androidx.media3.transformer.DefaultAssetLoaderFactory { <init>(...); }
+
+# FFmpeg (clip smoothing)
+-keep class com.arthenica.ffmpegkit.** { *; }
+-keep class com.arthenica.smartexception.** { *; }
+-dontwarn com.arthenica.**
