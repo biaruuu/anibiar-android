@@ -95,7 +95,6 @@ class ClipSource(
 
 private const val MAX_CLIP = 60.0
 private const val MIN_CLIP = 2.0
-private const val WINDOW = 90.0
 
 private fun clock(v: Double): String {
     val s = v.toInt().coerceAtLeast(0)
@@ -119,6 +118,8 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
     var start by mutableDoubleStateOf(src.position.coerceIn(0.0, (duration - MIN_CLIP).coerceAtLeast(0.0)))
     var end by mutableDoubleStateOf((src.position + 15.0).coerceAtMost(duration))
     var windowStart by mutableDoubleStateOf(0.0)
+    /** Seconds shown in the zoomed strip: fitted to the clip, so short clips get fine control. */
+    var win by mutableDoubleStateOf(60.0)
     var playhead by mutableDoubleStateOf(src.position)
     var playing by mutableStateOf(false)
     var aspect by mutableFloatStateOf(16f / 9f)
@@ -150,7 +151,7 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
 
     init {
         if (end - start < MIN_CLIP) start = (end - MIN_CLIP).coerceAtLeast(0.0)
-        centerWindow(start)
+        fitWindow()
         val item = MediaItem.Builder().setUri(src.url).apply { if (src.hls) setMimeType(MimeTypes.APPLICATION_M3U8) }.build()
         exo.setMediaSource(DefaultMediaSourceFactory(ClipMaker.dataSource(src.headers)).createMediaSource(item), (start * 1000).toLong())
         exo.prepare()
@@ -167,7 +168,7 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
     }
 
     fun centerWindow(t: Double) {
-        windowStart = (t - WINDOW / 2).coerceIn(0.0, (duration - WINDOW).coerceAtLeast(0.0))
+        windowStart = (t - win / 2).coerceIn(0.0, (duration - win).coerceAtLeast(0.0))
     }
 
     fun seek(t: Double) {
@@ -203,7 +204,7 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
     }
 
     /** The finger was lifted: land exactly where the playhead is. */
-    fun settle() = seek(playhead)
+    fun settle() { seek(playhead); fitWindow() }
 
     /** Picture sizes to choose from: smaller ones, and on top the best the stream has (kept as it is, never stretched). */
     fun resOptions(): List<Pair<String, Int>> {
@@ -240,7 +241,7 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
     fun setLength(seconds: Double) {
         end = (start + seconds).coerceAtMost(duration)
         if (end - start < MIN_CLIP) start = (end - MIN_CLIP).coerceAtLeast(0.0)
-        ensureVisible()
+        fitWindow()
         seek(start)
         exo.play()
     }
@@ -248,11 +249,29 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
     fun nudgeStart(d: Double) { moveStart(start + d); settle() }
     fun nudgeEnd(d: Double) { moveEnd(end + d); settle() }
 
+    /** Zooms the strip to the clip (a little wider than it) and centres it. */
+    fun fitWindow() {
+        win = ((end - start) * 1.7).coerceIn(20.0, 120.0).coerceAtMost(duration.coerceAtLeast(10.0))
+        centerWindow((start + end) / 2)
+    }
+
     /** Keeps both handles inside the zoomed strip, scrolling it when one is pushed near an edge. */
     fun ensureVisible() {
-        val max = (duration - WINDOW).coerceAtLeast(0.0)
-        if (start < windowStart + 3.0) windowStart = (start - 3.0).coerceIn(0.0, max)
-        else if (end > windowStart + WINDOW - 3.0) windowStart = (end - WINDOW + 3.0).coerceIn(0.0, max)
+        val max = (duration - win).coerceAtLeast(0.0)
+        val m = win * 0.06
+        if (start < windowStart + m) windowStart = (start - m).coerceIn(0.0, max)
+        else if (end > windowStart + win - m) windowStart = (end - win + m).coerceIn(0.0, max)
+    }
+
+    /** Jumping around the episode carries the clip along (same length), so both handles are always in view. */
+    fun placeClip(t: Double, soft: Boolean) {
+        val len = end - start
+        val s0 = t.coerceIn(0.0, (duration - MIN_CLIP).coerceAtLeast(0.0))
+        start = s0
+        end = (s0 + len).coerceAtMost(duration)
+        if (end - start < MIN_CLIP) start = (end - MIN_CLIP).coerceAtLeast(0.0)
+        centerWindow((start + end) / 2)
+        if (soft) seekSoft(start) else seek(start)
     }
 
     override fun close() { try { exo.release() } catch (_: Exception) {} }
@@ -304,7 +323,7 @@ fun ClipEditor(state: PlayerState) {
     // the screen is leaving for good (not just turning): stop the preview player
     DisposableEffect(state) { onDispose { if (!state.editorOpen) { ed.close(); state.editorObj = null } } }
 
-    Dialog(onDismissRequest = { if (!ed.busy) close() }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
+    Dialog(onDismissRequest = { if (!ed.busy) close() }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false, decorFitsSystemWindows = false)) {
         BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF0A0A0C)).statusBarsPadding().navigationBarsPadding()) {
             if (maxWidth > maxHeight) {
                 // turned sideways: the picture on the left, the editing tools on the right
@@ -318,7 +337,8 @@ fun ClipEditor(state: PlayerState) {
                         Spacer(Modifier.height(10.dp))
                         Timeline(ed)
                         Tools(ed)
-                        ToolPanel(ed, Modifier.fillMaxWidth().height(190.dp))
+                        ToolPanel(ed, Modifier.fillMaxWidth().height(220.dp))
+                        Spacer(Modifier.height(12.dp))
                     }
                 }
             } else {
@@ -328,7 +348,8 @@ fun ClipEditor(state: PlayerState) {
                     Transport(ed)
                     Timeline(ed)
                     Tools(ed)
-                    ToolPanel(ed, Modifier.fillMaxWidth().height(170.dp))
+                    ToolPanel(ed, Modifier.fillMaxWidth().height(200.dp))
+                    Spacer(Modifier.height(8.dp))
                 }
             }
         }
@@ -466,84 +487,98 @@ private fun Transport(ed: Editor) {
     }
 }
 
-/** A whole-episode bar to jump around, and a zoomed strip with two handles to cut the part (up to a minute). */
+/** A whole-episode bar to move the clip to another scene, and a zoomed strip with two handles to cut the part (up to a minute). */
 @Composable
 private fun Timeline(ed: Editor) {
     val accent = Color(0xFF7C8CFF)
     Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
-        // overview
+        // overview: tap or drag to put the clip on another scene
         Canvas(
-            Modifier.fillMaxWidth().height(26.dp)
-                .pointerInput(ed) { detectTapGestures { o -> val t = o.x / size.width * ed.duration; ed.centerWindow(t); ed.seek(t) } }
-                .pointerInput(ed) { detectDragGestures { c, _ -> c.consume(); val t = c.position.x.coerceIn(0f, size.width.toFloat()) / size.width * ed.duration; ed.centerWindow(t); ed.seekSoft(t) } },
+            Modifier.fillMaxWidth().height(30.dp)
+                .pointerInput(ed) { detectTapGestures { o -> ed.placeClip(o.x / size.width * ed.duration, false) } }
+                .pointerInput(ed) {
+                    detectDragGestures(onDragEnd = { ed.settle() }, onDragCancel = { ed.settle() }) { c, _ ->
+                        c.consume()
+                        ed.placeClip(c.position.x.coerceIn(0f, size.width.toFloat()) / size.width * ed.duration, true)
+                    }
+                },
         ) {
             val y = size.height / 2
             drawRoundRect(Color(0x33FFFFFF), Offset(0f, y - 3.dp.toPx()), Size(size.width, 6.dp.toPx()), CornerRadius(3.dp.toPx()))
             val a = (ed.start / ed.duration * size.width).toFloat()
             val b = (ed.end / ed.duration * size.width).toFloat()
-            drawRoundRect(accent, Offset(a, y - 3.dp.toPx()), Size((b - a).coerceAtLeast(3.dp.toPx()), 6.dp.toPx()), CornerRadius(3.dp.toPx()))
-            val ws = (ed.windowStart / ed.duration * size.width).toFloat()
-            val we = ((ed.windowStart + WINDOW) / ed.duration * size.width).toFloat().coerceAtMost(size.width)
-            drawRoundRect(Color.White, Offset(ws, y - 10.dp.toPx()), Size((we - ws).coerceAtLeast(6.dp.toPx()), 20.dp.toPx()), CornerRadius(5.dp.toPx()), style = Stroke(1.5.dp.toPx()))
+            drawRoundRect(accent, Offset(a, y - 4.dp.toPx()), Size((b - a).coerceAtLeast(6.dp.toPx()), 8.dp.toPx()), CornerRadius(4.dp.toPx()))
+            val px = (ed.playhead / ed.duration * size.width).toFloat()
+            drawCircle(Color.White, 6.dp.toPx(), Offset(px, y))
         }
         Spacer(Modifier.height(6.dp))
-        // trim strip
+        // zoomed strip
         var grab by remember { mutableIntStateOf(0) } // 1 = start handle, 2 = end handle, 3 = playhead
+        var off by remember { mutableStateOf(0.0) }   // finger position minus handle position, so a grabbed handle doesn't jump
         Canvas(
-            Modifier.fillMaxWidth().height(92.dp)
+            Modifier.fillMaxWidth().height(96.dp)
                 .pointerInput(ed) {
-                    detectTapGestures { o -> ed.seek(ed.windowStart + o.x / size.width * WINDOW) }
+                    val pad = 18.dp.toPx()
+                    detectTapGestures { o -> ed.seek(ed.windowStart + ((o.x - pad) / (size.width - 2 * pad)).coerceIn(0f, 1f) * ed.win) }
                 }
                 .pointerInput(ed) {
+                    val pad = 18.dp.toPx()
+                    fun tAt(x: Float) = ed.windowStart + ((x - pad) / (size.width - 2 * pad)).coerceIn(0f, 1f) * ed.win
                     detectDragGestures(
                         onDragStart = { o ->
-                            val xs = ((ed.start - ed.windowStart) / WINDOW * size.width).toFloat()
-                            val xe = ((ed.end - ed.windowStart) / WINDOW * size.width).toFloat()
-                            val reach = 40.dp.toPx()
-                            val ds = kotlin.math.abs(o.x - xs)
-                            val de = kotlin.math.abs(o.x - xe)
+                            val t = tAt(o.x)
+                            val perPx = ed.win / (size.width - 2 * pad)
+                            val reach = 44.dp.toPx() * perPx
+                            val ds = kotlin.math.abs(t - ed.start)
+                            val de = kotlin.math.abs(t - ed.end)
                             grab = if (ds <= reach && ds <= de) 1 else if (de <= reach) 2 else 3
+                            off = when (grab) { 1 -> t - ed.start; 2 -> t - ed.end; else -> 0.0 }
                         },
                         onDragEnd = { grab = 0; ed.settle() },
                         onDragCancel = { grab = 0; ed.settle() },
                     ) { change, _ ->
                         change.consume()
-                        val t = ed.windowStart + change.position.x.coerceIn(0f, size.width.toFloat()) / size.width * WINDOW
-                        when (grab) { 1 -> ed.moveStart(t); 2 -> ed.moveEnd(t); else -> ed.seekSoft(t) }
+                        val t = tAt(change.position.x)
+                        when (grab) { 1 -> ed.moveStart(t - off); 2 -> ed.moveEnd(t - off); else -> ed.seekSoft(t) }
                     }
                 },
         ) {
+            val pad = 18.dp.toPx()
             val w = size.width
             val h = size.height
-            fun x(t: Double) = ((t - ed.windowStart) / WINDOW * w).toFloat()
-            drawRoundRect(Color(0xFF1B1B20), Offset.Zero, Size(w, h), CornerRadius(10.dp.toPx()))
-            // ticks every 5 s
-            var t = Math.ceil(ed.windowStart / 5.0) * 5.0
-            while (t <= ed.windowStart + WINDOW) {
-                val major = (t.toInt() % 30) == 0
-                drawLine(Color(if (major) 0x66FFFFFF else 0x22FFFFFF), Offset(x(t), if (major) h * 0.12f else h * 0.3f), Offset(x(t), h * 0.88f), 1.dp.toPx())
-                t += 5.0
+            val inner = w - 2 * pad
+            fun x(t: Double) = (pad + (t - ed.windowStart) / ed.win * inner).toFloat()
+            drawRoundRect(Color(0xFF1B1B20), Offset.Zero, Size(w, h), CornerRadius(12.dp.toPx()))
+            // ticks: every second when zoomed in, every 5 or 10 seconds when wide
+            val step = if (ed.win <= 40.0) 1.0 else if (ed.win <= 80.0) 2.0 else 5.0
+            var t = Math.ceil(ed.windowStart / step) * step
+            while (t <= ed.windowStart + ed.win) {
+                val major = Math.round(t / step) % 5L == 0L
+                drawLine(Color(if (major) 0x77FFFFFF else 0x26FFFFFF), Offset(x(t), if (major) h * 0.14f else h * 0.32f), Offset(x(t), h * 0.86f), 1.dp.toPx())
+                t += step
             }
             val a = x(ed.start).coerceIn(0f, w)
             val b = x(ed.end).coerceIn(0f, w)
             drawRect(accent.copy(alpha = 0.28f), Offset(a, 0f), Size((b - a).coerceAtLeast(0f), h))
-            drawRoundRect(Color.White, Offset(a, 0f), Size((b - a).coerceAtLeast(0f), h), CornerRadius(8.dp.toPx()), style = Stroke(2.5.dp.toPx()))
-            val hw = 12.dp.toPx()
-            drawRoundRect(Color.White, Offset(a - hw / 2, -2.dp.toPx()), Size(hw, h + 4.dp.toPx()), CornerRadius(6.dp.toPx()))
-            drawRoundRect(Color.White, Offset(b - hw / 2, -2.dp.toPx()), Size(hw, h + 4.dp.toPx()), CornerRadius(6.dp.toPx()))
-            drawLine(Color(0xFF111111), Offset(a, h * 0.3f), Offset(a, h * 0.7f), 2.dp.toPx())
-            drawLine(Color(0xFF111111), Offset(b, h * 0.3f), Offset(b, h * 0.7f), 2.dp.toPx())
+            drawRect(Color.White, Offset(a, 0f), Size((b - a).coerceAtLeast(0f), 3.dp.toPx()))
+            drawRect(Color.White, Offset(a, h - 3.dp.toPx()), Size((b - a).coerceAtLeast(0f), 3.dp.toPx()))
+            val hw = 16.dp.toPx()
+            drawRoundRect(Color.White, Offset(a - hw, 0f), Size(hw, h), CornerRadius(8.dp.toPx()))
+            drawRoundRect(Color.White, Offset(b, 0f), Size(hw, h), CornerRadius(8.dp.toPx()))
+            // grip lines
+            for (gx in listOf(a - hw * 0.5f, b + hw * 0.5f)) drawLine(Color(0xFF222222), Offset(gx, h * 0.34f), Offset(gx, h * 0.66f), 2.5.dp.toPx())
             val px = x(ed.playhead)
             if (px in 0f..w) {
-                drawLine(Color(0xFFFF5A5A), Offset(px, -6.dp.toPx()), Offset(px, h + 6.dp.toPx()), 2.dp.toPx())
+                drawLine(Color(0xFFFF5A5A), Offset(px, -4.dp.toPx()), Offset(px, h + 4.dp.toPx()), 2.dp.toPx())
+                drawCircle(Color(0xFFFF5A5A), 5.dp.toPx(), Offset(px, -2.dp.toPx()))
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            Text("start ${clock(ed.start)}", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+            Text("start ${clock(ed.start)}", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
-            Text("drag the white handles · max 1:00", color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp)
+            Text("drag a handle \u00B7 drag the top bar to move the clip", color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp)
             Spacer(Modifier.weight(1f))
-            Text("end ${clock(ed.end)}", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+            Text("end ${clock(ed.end)}", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
