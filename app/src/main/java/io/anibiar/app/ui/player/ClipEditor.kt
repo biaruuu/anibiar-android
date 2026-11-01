@@ -105,12 +105,12 @@ private fun clock(v: Double): String {
 /** All the editor's choices, kept together; the preview player lives here too. */
 @Stable
 private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
-    // a light preview player: a small buffer and at most 720p, so editing stays smooth (the saved clip is made from the best picture)
+    // a light preview player: a small buffer and at most 480p, so editing stays smooth (the saved clip is made from the best picture)
     val exo: ExoPlayer = ExoPlayer.Builder(ctx.applicationContext)
         .setLoadControl(
-            androidx.media3.exoplayer.DefaultLoadControl.Builder().setBufferDurationsMs(6_000, 16_000, 400, 1_200).build(),
+            androidx.media3.exoplayer.DefaultLoadControl.Builder().setBufferDurationsMs(5_000, 12_000, 400, 1_000).setTargetBufferBytes(12 * 1024 * 1024).build(),
         ).build().apply {
-            trackSelectionParameters = trackSelectionParameters.buildUpon().setMaxVideoSize(1280, 720).build()
+            trackSelectionParameters = trackSelectionParameters.buildUpon().setMaxVideoSize(854, 480).build()
             setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
         }
     private var lastSeek = 0L
@@ -159,7 +159,7 @@ private class Editor(ctx: Context, val src: ClipSource) : AutoCloseable {
             override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
             override fun onVideoSizeChanged(v: androidx.media3.common.VideoSize) {
                 if (v.width > 0 && v.height > 0) {
-                    aspect = v.width * v.pixelWidthHeightRatio / v.height
+                    aspect = (v.width * v.pixelWidthHeightRatio / v.height).let { if (it.isNaN() || it.isInfinite()) 16f / 9f else it.coerceIn(0.4f, 3f) }
                     videoHeight = v.height
                 }
             }
@@ -350,9 +350,12 @@ private fun Preview(ed: Editor) {
                 modifier = Modifier.fillMaxSize(),
                 factory = { c -> android.view.TextureView(c).also { ed.exo.setVideoTextureView(it) } },
                 update = { tv ->
-                    val cm = filterMatrix(ed.filter)
-                    if (cm == null) tv.setLayerType(android.view.View.LAYER_TYPE_NONE, null)
-                    else tv.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, android.graphics.Paint().apply { colorFilter = android.graphics.ColorMatrixColorFilter(cm) })
+                    if (tv.tag != ed.filter) {
+                        tv.tag = ed.filter
+                        val cm = filterMatrix(ed.filter)
+                        if (cm == null) tv.setLayerType(android.view.View.LAYER_TYPE_NONE, null)
+                        else tv.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, android.graphics.Paint().apply { colorFilter = android.graphics.ColorMatrixColorFilter(cm) })
+                    }
                 },
                 onRelease = { tv -> try { ed.exo.clearVideoTextureView(tv) } catch (_: Exception) {} },
             )

@@ -7,7 +7,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
-class App : Application() {
+class App : Application(), coil.ImageLoaderFactory {
+    /** Pictures use a smaller share of memory, so the video player and the editor have room. */
+    override fun newImageLoader(): coil.ImageLoader = coil.ImageLoader.Builder(this)
+        .memoryCache { coil.memory.MemoryCache.Builder(this).maxSizePercent(0.12).build() }
+        .allowRgb565(true)
+        .build()
+
     override fun onCreate() {
         super.onCreate()
         ctx = applicationContext
@@ -20,6 +26,16 @@ class App : Application() {
             } catch (_: Throwable) {
             }
             previous?.uncaughtException(t, e)
+        }
+        // why the app closed last time (Android 11+), for the connection report
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            try {
+                val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                am.getHistoricalProcessExitReasons(packageName, 0, 1).firstOrNull()?.let {
+                    io.anibiar.app.core.Prefs.putString("exit.last", "reason ${it.reason} (${it.description ?: ""}) ${java.util.Date(it.timestamp)}")
+                }
+            } catch (_: Throwable) {
+            }
         }
         Auth.init() // the profile loads in the background; the app opens right away
     }

@@ -90,12 +90,13 @@ private fun cleanCaption(s: String): String = s
 internal val sharedExecutor: java.util.concurrent.Executor by lazy { java.util.concurrent.Executors.newFixedThreadPool(4) }
 
 class PlayerState(context: Context) {
-    val exo: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
+    val exo: ExoPlayer = ExoPlayer.Builder(context.applicationContext, androidx.media3.exoplayer.DefaultRenderersFactory(context.applicationContext).setEnableDecoderFallback(true))
         // start playing after 0.8 s of video, keep up to a minute buffered, and begin with a fast-network guess
         .setLoadControl(
             androidx.media3.exoplayer.DefaultLoadControl.Builder()
-                .setBufferDurationsMs(30_000, 90_000, 800, 2_500)
-                .setPrioritizeTimeOverSizeThresholds(true)
+                .setBufferDurationsMs(15_000, 40_000, 1_000, 2_500)
+                .setTargetBufferBytes(40 * 1024 * 1024) // memory stays bounded even for very high bitrates
+                .setPrioritizeTimeOverSizeThresholds(false)
                 .build(),
         )
         .setBandwidthMeter(
@@ -323,9 +324,9 @@ class PlayerState(context: Context) {
         val item = MediaItem.Builder().setUri(url).apply { if (hls) setMimeType(MimeTypes.APPLICATION_M3U8) }.build()
         val source = DefaultMediaSourceFactory(dataSource).createMediaSource(item)
 
-        // always the best picture the stream and the phone can show
+        // HD always: only 720p and above are used when the stream has them, and the player still adapts between those
         exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO)
-            .setForceHighestSupportedBitrate(true).build()
+            .setMinVideoSize(1280, 720).build()
         exo.setMediaSource(source, if (startAt > 1) (startAt * 1000).toLong() else 0L)
         exo.setPlaybackSpeed(speed)
         exo.volume = if (muted) 0f else 1f

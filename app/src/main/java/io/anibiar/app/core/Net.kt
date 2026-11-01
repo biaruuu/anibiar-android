@@ -46,7 +46,7 @@ object Net {
                 .enableQuic(true)
                 .enableBrotli(true)
                 .setStoragePath(dir.absolutePath)
-                .enableHttpCache(org.chromium.net.CronetEngine.Builder.HTTP_CACHE_DISK, 30L * 1024 * 1024)
+                .enableHttpCache(org.chromium.net.CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP, 20L * 1024 * 1024) // keeps connection info only; video segments are never written to disk
                 .build()
         } catch (_: Throwable) {
             null
