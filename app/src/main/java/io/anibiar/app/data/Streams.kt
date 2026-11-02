@@ -138,6 +138,28 @@ private fun nameFor(provider: String, server: String, taken: MutableSet<String>)
  * Stream links need a Referer header; the player sends it itself, so no proxy is needed.
  */
 object Streams {
+    private val base: String get() = Config.anivexaUrl
+
+    /** Episodes from one source: Prism for plain names, your AniBiar TV API for "x:" names. */
+    private suspend fun laneEpisodes(lane: String, id: Int, ms: Long): JSONObject {
+        val r = withTimeoutOrNull(ms) {
+            if (lane.startsWith("x:")) {
+                val p = lane.substring(2)
+                getJson("$base/episodes/$p/$id?map=false", ms).obj(p) ?: throw ApiException("No data from $p")
+            } else Prism.episodes(lane, id)
+        }
+        return r ?: throw ApiException("Timed out")
+    }
+
+    private suspend fun laneWatch(lane: String, id: Int, audio: String, episode: Int, ms: Long): JSONObject {
+        val r = withTimeoutOrNull(ms) {
+            if (lane.startsWith("x:")) {
+                val p = lane.substring(2)
+                getJson("$base/watch/$p/$id/$audio/$p-$episode", ms)
+            } else Prism.watch(lane, id, audio, episode)
+        }
+        return r ?: throw ApiException("Timed out")
+    }
     private suspend fun getJson(url: String, timeoutMs: Long): JSONObject {
         val res = try {
             Net.get(url, mapOf("Accept" to "application/json", "User-Agent" to Net.UA), timeoutMs)
@@ -246,8 +268,7 @@ object Streams {
             App.scope.launch {
                 var failed = false
                 try {
-                    val raw = (withTimeoutOrNull(25_000) { Prism.episodes(provider, id) } ?: throw ApiException("Timed out"))
-                    found[provider] = raw
+                    found[provider] = laneEpisodes(provider, id, 25_000)
                     val p = build(order, found.toMap())
                     if (p != null) {
                         if (!done.isCompleted) done.complete(p)
@@ -320,7 +341,7 @@ object Streams {
             App.scope.launch {
                 var ok = false
                 try {
-                    val raw = (withTimeoutOrNull(20_000) { Prism.episodes(provider, animeId) } ?: throw ApiException("Timed out"))
+                    val raw = laneEpisodes(provider, animeId, 20_000)
                     ok = true
                     val has = raw.obj("episodes")?.arr("dub").objects().any { it.int("number") == episode }
                     if (has) result.complete(true)
@@ -352,6 +373,12 @@ object Streams {
     private class Flight(val job: Deferred<WatchPayload>, val more: CopyOnWriteArrayList<(WatchPayload) -> Unit>)
 
     private val flights = HashMap<String, Flight>()
+
+    /** Forgets the remembered answer for an episode, so the next request asks every server again. */
+    fun forgetWatch(animeId: Int, dub: Boolean, episode: Int) {
+        val prefix = "$animeId:${if (dub) "dub" else "sub"}:$episode:"
+        watchMemory.keys.filter { it.startsWith(prefix) }.forEach { watchMemory.remove(it) }
+    }
 
     /** Asking twice for the same episode (a warm-up and the real call) shares one set of requests. */
     suspend fun watch(
@@ -398,9 +425,10 @@ object Streams {
             val streams = ArrayList<StreamSource>()
             var intro: TimeRange? = null
             var outro: TimeRange? = null
+            val seenUrls = HashSet<String>()
             for (p in order) {
                 val r = results[p] ?: continue
-                streams.addAll(r.streams)
+                streams.addAll(r.streams.filter { seenUrls.add(it.src) })
                 if (intro == null) intro = r.intro
                 if (outro == null) outro = r.outro
             }
@@ -418,7 +446,7 @@ object Streams {
                         synchronized(taken) { taken.add(v.source.name) }
                         ParsedWatch(listOf(v.source), v.intro, v.outro)
                     } else {
-                        val raw = (withTimeoutOrNull(25_000) { Prism.watch(provider, animeId, audio, episode) } ?: throw ApiException("Timed out"))
+                        val raw = laneWatch(provider, animeId, audio, episode, 25_000)
                         synchronized(taken) { parseWatch(provider, dub, raw, taken) }
                     }
                     if (r.streams.isNotEmpty()) {

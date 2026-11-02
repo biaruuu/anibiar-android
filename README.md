@@ -17,6 +17,7 @@ Repo **Settings > Secrets and variables > Actions > Repository secrets > New rep
 | Name | What it does |
 | --- | --- |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | shared cache for episode lists (faster) |
+| `ANIVEXA_URL` | your AniBiar TV streaming API (used together with the built-in Prism engine) |
 | `TMDB_KEY` | title logos and the artwork gallery |
 
 A key inside an APK can be extracted by anyone who has the file: use a separate Upstash database for the app.

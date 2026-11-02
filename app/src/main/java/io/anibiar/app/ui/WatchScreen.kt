@@ -224,7 +224,7 @@ private class WatchModel(
 
     /* ---------------------------------- streams ---------------------------------- */
 
-    fun loadWatch() {
+    fun loadWatch(attempt: Int = 0) {
         val e = current ?: return
         val g = gen.incrementAndGet()
         watch = null
@@ -249,9 +249,23 @@ private class WatchModel(
             } catch (ce: CancellationException) {
                 throw ce
             } catch (ex: Exception) {
-                if (g == gen.get()) watchError = friendlyError(ex)
+                if (g != gen.get()) return@launch
+                if (attempt == 0) {
+                    // servers sometimes answer on the second try: ask everyone once more before giving up
+                    kotlinx.coroutines.delay(1_200)
+                    if (g == gen.get()) loadWatch(attempt = 1)
+                } else {
+                    watchError = friendlyError(ex)
+                }
             }
         }
+    }
+
+    /** Asks every server again, ignoring what was remembered. */
+    fun refreshServers() {
+        val e = current ?: return
+        Streams.forgetWatch(animeId, isDub, e.number)
+        loadWatch()
     }
 
     private fun fetchSkip(g: Int, number: Int) {
@@ -431,7 +445,8 @@ fun WatchScreen(id: Int, episode: Int, dub: Boolean, onBack: () -> Unit) {
                             error = err,
                             loadingEpisodes = m.eps == null,
                             poster = m.detail?.anime?.banner ?: m.detail?.anime?.poster,
-                            onRetry = { if (m.epsError != null) m.loadEpisodes(force = true) else m.loadWatch() },
+                            onRetry = { if (m.epsError != null) m.loadEpisodes(force = true) else m.refreshServers() },
+                            onServers = if (m.epsError == null && m.watch != null) ({ serverSheet = true }) else null,
                         )
                     }
                 },
@@ -449,7 +464,7 @@ fun WatchScreen(id: Int, episode: Int, dub: Boolean, onBack: () -> Unit) {
 
 /** Covers the player while episodes / the stream are loading, or shows why it could not load. */
 @Composable
-private fun BoxScope.PlayerStatus(error: String?, loadingEpisodes: Boolean, poster: String?, onRetry: () -> Unit) {
+private fun BoxScope.PlayerStatus(error: String?, loadingEpisodes: Boolean, poster: String?, onRetry: () -> Unit, onServers: (() -> Unit)? = null) {
     Box(Modifier.matchParentSize().background(C.k(0.88f)).blockTouches()) {
         if (poster != null) Img(poster, Modifier.fillMaxSize().alpha(0.25f), ContentScale.Crop)
         Column(Modifier.align(Alignment.Center).padding(horizontal = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -460,7 +475,10 @@ private fun BoxScope.PlayerStatus(error: String?, loadingEpisodes: Boolean, post
                 Spacer(Modifier.height(4.dp))
                 Text(error, fontSize = 12.sp, color = C.w(0.7f), maxLines = 3, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(10.dp))
-                FlatButton("Try again", icon = Icons.Rounded.Refresh, kind = Kind.White, height = 36.dp, fontSize = 12, onClick = onRetry)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlatButton("Try again", icon = Icons.Rounded.Refresh, kind = Kind.White, height = 36.dp, fontSize = 12, onClick = onRetry)
+                    if (onServers != null) FlatButton("Servers", kind = Kind.Bar, height = 36.dp, fontSize = 12, onClick = onServers)
+                }
             } else {
                 CircularProgressIndicator(Modifier.size(28.dp), color = Color.White, strokeWidth = 2.5.dp)
                 Spacer(Modifier.height(10.dp))
@@ -711,12 +729,22 @@ private fun EpisodeRow(x: WatchEpisode, selected: Boolean, hasDub: Boolean, onCl
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(96.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)).background(C.w(0.06f))) {
+        Box(Modifier.width(108.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp)).background(C.w(0.06f))) {
             Img(x.image, Modifier.fillMaxSize())
+            Box(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(26.dp)
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color(0xAA000000)))),
+            )
+            Text(
+                if (selected) "NOW PLAYING" else "EP ${x.number}",
+                Modifier.align(Alignment.BottomStart).padding(start = 7.dp, bottom = 4.dp),
+                fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 1,
+            )
+            if (selected) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp).background(C.lime))
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text("${x.number}. ${x.title}", fontSize = 13.5.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(x.title, fontSize = 13.5.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(5.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.ClosedCaption, null, Modifier.size(15.dp), tint = C.w(0.6f))
@@ -771,9 +799,20 @@ private fun ServerSheet(m: WatchModel, onClose: () -> Unit) {
         LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 16.dp + navBarHeight())) {
             item {
                 Text(
-                    "Soft subs are separate captions you can restyle. Hard subs are part of the picture.",
+                    "${streams.size} server${if (streams.size == 1) "" else "s"} found. Soft subs are separate captions you can restyle; hard subs are part of the picture.",
                     Modifier.padding(horizontal = 6.dp, vertical = 8.dp), fontSize = 12.sp, lineHeight = 17.sp, color = C.w(0.5f),
                 )
+                Row(
+                    Modifier.padding(horizontal = 6.dp, vertical = 4.dp).clip(RoundedCornerShape(999.dp)).background(C.w(0.1f))
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClose(); m.refreshServers() }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp), tint = Color.White)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Search for more servers", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                }
+                Spacer(Modifier.height(6.dp))
             }
             items(streams, key = { it.id }) { s ->
                 val shape = RoundedCornerShape(14.dp)
