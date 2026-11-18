@@ -102,50 +102,15 @@ class ClipRequest(
  * with the subtitles drawn into the video in the font and style the viewer picked.
  */
 object ClipMaker {
-    /** Frame interpolation needs FFmpeg's native library; on phones that can't load it the option is simply not offered. */
-    val smoothAvailable: Boolean by lazy {
-        try {
-            Class.forName("com.arthenica.ffmpegkit.FFmpegKit")
-            Class.forName("com.arthenica.smartexception.java.Exceptions")
-            android.os.Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
     /**
-     * Adds in-between frames to [input] (motion-compensated, with scene-change detection so cuts aren't blended) and
-     * writes [output] at [fps]. Tries the phone's H.264 encoder first, then a software one. [onProgress] gets 0..1.
+     * Frame interpolation ("Smooth 60/120") needed FFmpegKit, whose bundled FFmpeg libraries clash with libmpv's
+     * (same file names), so the two cannot ship in one app. libmpv, which runs Anime4K, won; the option is not offered.
      */
+    val smoothAvailable: Boolean = false
+
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun smooth(input: File, output: File, fps: Int, length: Double, mbps: Int, onProgress: (Float) -> Unit) {
-        val filter = "minterpolate=fps=$fps:mi_mode=mci:mc_mode=obmc:me_mode=bidir:vsbmc=0:scd=fdiff"
-        val rate = mbps.coerceIn(4, 20)
-        val tries = listOf(
-            "-y -i ${input.absolutePath} -vf $filter -c:v h264_mediacodec -b:v ${rate}M -c:a copy -movflags +faststart ${output.absolutePath}",
-            "-y -i ${input.absolutePath} -vf $filter -c:v mpeg4 -q:v 3 -c:a copy -movflags +faststart ${output.absolutePath}",
-        )
-        var last = ""
-        for (cmd in tries) {
-            output.delete()
-            val ok = suspendCancellableCoroutine<Boolean> { cont ->
-                try {
-                    val session = com.arthenica.ffmpegkit.FFmpegKit.executeAsync(
-                        cmd,
-                        { s ->
-                            last = (s.failStackTrace ?: s.allLogsAsString ?: "").takeLast(300)
-                            if (cont.isActive) cont.resume(com.arthenica.ffmpegkit.ReturnCode.isSuccess(s.returnCode))
-                        },
-                        { },
-                        { st -> onProgress((st.time.toDouble() / (length * 1000.0)).coerceIn(0.0, 1.0).toFloat()) },
-                    )
-                    cont.invokeOnCancellation { try { com.arthenica.ffmpegkit.FFmpegKit.cancel(session.sessionId) } catch (_: Throwable) {} }
-                } catch (e: Throwable) {
-                    if (cont.isActive) cont.resumeWithException(e)
-                }
-            }
-            if (ok && output.exists() && output.length() > 0) return
-        }
-        throw IllegalStateException("Smoothing failed. ${last.trim()}".take(220))
+        throw IllegalStateException("Smooth frame rates are not available in this build.")
     }
 
     private val bandwidth = Regex("BANDWIDTH=(\\d+)")
