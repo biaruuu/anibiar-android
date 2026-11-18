@@ -20,3 +20,6 @@
 -keep class com.arthenica.ffmpegkit.** { *; }
 -keep class com.arthenica.smartexception.** { *; }
 -dontwarn com.arthenica.**
+
+# libmpv: its native code calls back into these classes by name
+-keep class is.xyz.mpv.** { *; }

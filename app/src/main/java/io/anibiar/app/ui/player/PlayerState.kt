@@ -131,9 +131,60 @@ class PlayerState(context: Context) {
         android.os.Handler(android.os.Looper.getMainLooper()).post { animeStatus = st }
     }
 
+    /** "exo" (ExoPlayer, shaders as video effects) or "mpv" (libmpv, shaders as GLSL files). */
+    var engine by mutableStateOf(Prefs.getString("player.engine") ?: "exo")
+        private set
+    var notice by mutableStateOf<String?>(null)
+    private var mpv: MpvView? = null
+    private var mpvBroken = false
+    private val useMpv get() = engine == "mpv" && mpv != null
+
+    /** The libmpv picture view; created the first time it is needed. Null when libmpv cannot start here. */
+    fun mpvHost(): MpvView? {
+        if (engine != "mpv" || mpvBroken || released) return null
+        mpv?.let { return it }
+        val v = MpvView(appCtx)
+        val ok = v.start(io.anibiar.app.anime.AnimeShaders.mpvPaths(appCtx, animeUpscale, animeSharpen))
+        if (!ok) {
+            v.release()
+            mpvBroken = true
+            engine = "exo"
+            Prefs.putString("player.engine", "exo")
+            notice = "libmpv could not start on this phone, ExoPlayer is used instead"
+            reopenAt(position)
+            return null
+        }
+        mpv = v
+        return v
+    }
+
+    @JvmName("applyEngine")
+    fun setEngine(name: String) {
+        if (name == engine || released) return
+        val at = position
+        flush()
+        if (name == "mpv") mpvBroken = false
+        engine = name
+        Prefs.putString("player.engine", name)
+        if (name == "mpv") exo.stop().also { exo.clearMediaItems() } else { mpv?.release(); mpv = null; animeStatus = null; applyAnime() }
+        if (name == "mpv") mpvHost()
+        reopenAt(at)
+    }
+
+    private fun reopenAt(at: Double) {
+        val a = openArgs ?: return
+        @Suppress("UNCHECKED_CAST")
+        open(a[0] as String, a[1] as Boolean, a[2] as Map<String, String>, a[3] as List<StreamSubtitle>, at, a[4] as TimeRange?, a[5] as TimeRange?, a[6] as Double?)
+    }
+
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun applyAnime() {
         if (released) return
+        if (engine == "mpv") {
+            mpv?.setShaders(io.anibiar.app.anime.AnimeShaders.mpvPaths(appCtx, animeUpscale, animeSharpen))
+            if (!animeUpscale && !animeSharpen) animeStatus = null
+            return
+        }
         try {
             exo.setVideoEffects(io.anibiar.app.anime.AnimeShaders.effects(appCtx, animeUpscale, animeSharpen, animeTracker))
         } catch (e: Throwable) {
@@ -344,9 +395,21 @@ class PlayerState(context: Context) {
         subtitles.firstOrNull()?.headers?.forEach { (k, v) -> merged.putIfAbsent(k, v) }
         curUrl = url; curHls = hls; curHeaders = merged
         openArgs = arrayOf(url, hls, headers, subtitles, intro, outro, length)
-        val engine = Net.cronet
-        val dataSource: androidx.media3.datasource.DataSource.Factory = if (engine != null) {
-            androidx.media3.datasource.cronet.CronetDataSource.Factory(engine, sharedExecutor)
+        val host = mpvHost()
+        if (host != null) {
+            exo.stop()
+            exo.clearMediaItems()
+            host.load(url, merged, if (startAt > 1) startAt else 0.0, !autoplay)
+            host.setSpeed(speed.toDouble())
+            host.setMuted(muted)
+            controlsVisible = true
+            bump()
+            pickCaption(subtitles)
+            return
+        }
+        val cronet = Net.cronet
+        val dataSource: androidx.media3.datasource.DataSource.Factory = if (cronet != null) {
+            androidx.media3.datasource.cronet.CronetDataSource.Factory(cronet, sharedExecutor)
                 .setDefaultRequestProperties(merged)
         } else {
             OkHttpDataSource.Factory(Net.client).setDefaultRequestProperties(merged)
@@ -365,6 +428,10 @@ class PlayerState(context: Context) {
         controlsVisible = true
         bump()
 
+        pickCaption(subtitles)
+    }
+
+    private fun pickCaption(subtitles: List<StreamSubtitle>) {
         // captions: the default one, else English, else the first
         var pick = subtitles.indexOfFirst { it.isDefault }
         if (pick < 0) {
@@ -396,6 +463,7 @@ class PlayerState(context: Context) {
         flush()
         exo.stop()
         exo.clearMediaItems()
+        mpv?.stop()
         closeMenu()
         editorOpen = true
     }
@@ -480,6 +548,11 @@ class PlayerState(context: Context) {
     /* ---------------------------------- controls ---------------------------------- */
 
     fun togglePlay() {
+        mpv?.takeIf { useMpv }?.let { m ->
+            if (m.ended) { endedSent = false; m.seek(0.0); m.setPaused(false) } else m.setPaused(!m.paused)
+            bump()
+            return
+        }
         if (exo.playbackState == Player.STATE_ENDED) {
             endedSent = false
             exo.seekTo(0)
@@ -495,9 +568,9 @@ class PlayerState(context: Context) {
     fun seekTo(seconds: Double) {
         val max = if (duration > 0) duration else seconds
         val t = seconds.coerceIn(0.0, max.coerceAtLeast(0.0))
-        exo.seekTo((t * 1000).toLong())
+        if (useMpv) mpv?.seek(t) else exo.seekTo((t * 1000).toLong())
         position = t
-        if (exo.playbackState == Player.STATE_ENDED || t < duration - 1) endedSent = false
+        if ((!useMpv && exo.playbackState == Player.STATE_ENDED) || t < duration - 1) endedSent = false
     }
 
     fun seekBy(delta: Double) = seekTo(position + delta)
@@ -506,11 +579,13 @@ class PlayerState(context: Context) {
     fun setSpeed(s: Float) {
         speed = s
         exo.setPlaybackSpeed(s)
+        mpv?.setSpeed(s.toDouble())
     }
 
     fun toggleMute() {
         muted = !muted
         exo.volume = if (muted) 0f else 1f
+        mpv?.setMuted(muted)
         bump()
     }
 
@@ -607,8 +682,47 @@ class PlayerState(context: Context) {
 
     /* ------------------------------------- tick ------------------------------------- */
 
+    private fun tickMpv(m: MpvView) {
+        val pos = m.position.coerceAtLeast(0.0)
+        val dur = m.duration.coerceAtLeast(0.0)
+        position = pos
+        if (dur != duration) duration = dur
+        if (dur > 0) bufferedFraction = (m.buffered / dur).coerceIn(0.0, 1.0).toFloat()
+        buffering = m.stalled || (!m.loaded && !m.paused)
+        if (m.loaded && !ready) { loading = false; ready = true }
+        val p = m.loaded && !m.paused && !m.ended && !failed
+        if (p != playing) {
+            playing = p
+            if (p) bump() else controlsVisible = true
+        }
+        if (m.ended && !endedSent && dur > 0) {
+            endedSent = true
+            position = dur
+            onTime?.invoke(dur, dur)
+            onEnded?.invoke()
+        }
+        if (m.error != null && !failed) {
+            failed = true
+            loading = false
+            onFail?.invoke()
+        }
+        animeStatus = io.anibiar.app.anime.AnimeShaders.mpvStatus(appCtx, animeUpscale, animeSharpen, m.videoW, m.videoH, m.outW, m.outH)
+    }
+
     private fun tick() {
         if (released) return
+        mpv?.takeIf { useMpv }?.let { m ->
+            tickMpv(m)
+            val c = if (track >= 0) captionAt(position) else ""
+            if (c != caption) caption = c
+            checkSkip()
+            if (abs(position - lastReport) >= 5 && duration > 0 && playing) {
+                lastReport = position
+                onTime?.invoke(position, duration)
+            }
+            if (controlsVisible && playing && !seeking && !menuOpen && System.currentTimeMillis() - lastTouch > 3500) controlsVisible = false
+            return
+        }
         val pos = exo.currentPosition / 1000.0
         val dur = if (exo.duration > 0) exo.duration / 1000.0 else 0.0
         position = pos
@@ -627,13 +741,16 @@ class PlayerState(context: Context) {
     /** Reports where the viewer is (also called when leaving the page). */
     fun flush() {
         if (released || !ready) return
+        mpv?.takeIf { useMpv }?.let { m -> if (m.duration > 0) onTime?.invoke(m.position, m.duration); return }
         val d = if (exo.duration > 0) exo.duration / 1000.0 else duration
         if (d > 0) onTime?.invoke(exo.currentPosition / 1000.0, d)
     }
 
     /** Pauses when the app goes to the background. */
     fun pause() {
-        if (!released) exo.pause()
+        if (released) return
+        exo.pause()
+        mpv?.setPaused(true)
     }
 
     fun release() {
@@ -645,5 +762,7 @@ class PlayerState(context: Context) {
         scope.cancel()
         exo.removeListener(listener)
         exo.release()
+        mpv?.release()
+        mpv = null
     }
 }

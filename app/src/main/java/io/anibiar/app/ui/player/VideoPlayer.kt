@@ -144,21 +144,32 @@ fun VideoPlayer(
         val topBar = btn + cl(4f, w * 0.006f, 8f) + pad
 
         // video
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    setShutterBackgroundColor(android.graphics.Color.BLACK)
-                    subtitleView?.visibility = View.GONE
-                    player = state.exo
-                }
-            },
-            update = { v ->
-                if (v.player !== state.exo) v.player = state.exo
-            },
-        )
+        val mpvHost = if (state.engine == "mpv") state.mpvHost() else null
+        if (mpvHost != null) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { _ ->
+                    (mpvHost.parent as? android.view.ViewGroup)?.removeView(mpvHost)
+                    mpvHost
+                },
+            )
+        } else {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        setShutterBackgroundColor(android.graphics.Color.BLACK)
+                        subtitleView?.visibility = View.GONE
+                        player = state.exo
+                    }
+                },
+                update = { v ->
+                    if (v.player !== state.exo) v.player = state.exo
+                },
+            )
+        }
 
         Captions(state, w, controls = state.controlsVisible)
         if (state.editorOpen) ClipEditor(state)
@@ -560,6 +571,10 @@ private fun Menu(state: PlayerState, w: Float, maxHeight: Float) {
                         onClick = if (state.tracks.isEmpty()) null else ({ state.setMenuView("captions") }),
                     )
                     if (state.tracks.isNotEmpty()) MenuRow("Caption style", "", fs, chevron = true) { state.setMenuView("style") }
+                    MenuRow("Video engine", if (state.engine == "mpv") "libmpv" else "ExoPlayer", fs, chevron = false) {
+                        state.setEngine(if (state.engine == "mpv") "exo" else "mpv")
+                    }
+                    state.notice?.let { MenuRow("Note", it, fs, chevron = false) {} }
                     MenuRow("Anime4K upscaler", if (state.animeUpscale) "On" else "Off", fs, chevron = false) { state.setAnimeUpscale(!state.animeUpscale) }
                     MenuRow("Line sharpener", if (state.animeSharpen) "On" else "Off", fs, chevron = false) { state.setAnimeSharpen(!state.animeSharpen) }
                     state.animeStatus?.let { MenuRow("Picture", it.summary, fs, chevron = false) {} }

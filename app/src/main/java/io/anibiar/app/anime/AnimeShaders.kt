@@ -2,6 +2,7 @@ package io.anibiar.app.anime
 
 import android.content.Context
 import android.util.Log
+import java.io.File
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import kotlin.math.max
@@ -44,16 +45,56 @@ internal object AnimeShaders {
 
     private val cache = HashMap<String, List<MpvUserShaderPass>>()
 
+    private fun source(context: Context, name: String): String {
+        val src = context.assets.open("$DIR/$name").bufferedReader().use { it.readText() }
+        if (name != UPSCALE) return src
+        val condition = "$UPSCALE_CONDITION " +
+            "$MINIMUM_UPSCALE_LONG_SIDE MAIN.w / 1.200 > $MINIMUM_UPSCALE_SHORT_SIDE MAIN.h / 1.200 > * + " +
+            "$MINIMUM_UPSCALE_SHORT_SIDE MAIN.w / 1.200 > $MINIMUM_UPSCALE_LONG_SIDE MAIN.h / 1.200 > * + 0 >"
+        return src.replace(UPSCALE_CONDITION + "\n", condition + "\n")
+    }
+
     @Synchronized
-    private fun shader(context: Context, name: String): List<MpvUserShaderPass> = cache.getOrPut(name) {
-        var src = context.assets.open("$DIR/$name").bufferedReader().use { it.readText() }
-        if (name == UPSCALE) {
-            val condition = "$UPSCALE_CONDITION " +
-                "$MINIMUM_UPSCALE_LONG_SIDE MAIN.w / 1.200 > $MINIMUM_UPSCALE_SHORT_SIDE MAIN.h / 1.200 > * + " +
-                "$MINIMUM_UPSCALE_SHORT_SIDE MAIN.w / 1.200 > $MINIMUM_UPSCALE_LONG_SIDE MAIN.h / 1.200 > * + 0 >"
-            src = src.replace(UPSCALE_CONDITION + "\n", condition + "\n")
+    private fun shader(context: Context, name: String): List<MpvUserShaderPass> =
+        cache.getOrPut(name) { MpvUserShaderParser.parse(source(context, name)) }
+
+    private fun names(upscale: Boolean, sharpen: Boolean): List<String> = buildList {
+        if (sharpen) addAll(listOf(RESTORE, DARKEN, THIN))
+        if (upscale) add(UPSCALE)
+        if (sharpen) add(FINAL)
+    }
+
+    /** The shader files libmpv loads (`glsl-shaders`), written to the app's private folder. Empty when both are off. */
+    fun mpvPaths(context: Context, upscale: Boolean, sharpen: Boolean): List<String> {
+        val dir = File(context.filesDir, DIR)
+        return names(upscale, sharpen).mapNotNull { name ->
+            try {
+                val bytes = source(context, name).toByteArray()
+                dir.mkdirs()
+                val f = File(dir, name)
+                if (!f.exists() || !f.readBytes().contentEquals(bytes)) f.writeBytes(bytes)
+                f.absolutePath
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not prepare $name for libmpv", e)
+                null
+            }
         }
-        MpvUserShaderParser.parse(src)
+    }
+
+    /** What libmpv's shaders are doing, worked out with the same planner the other engine uses. */
+    fun mpvStatus(context: Context, upscale: Boolean, sharpen: Boolean, srcW: Int, srcH: Int, outW: Int, outH: Int): AnimeEnhancementStatus? {
+        if (!upscale && !sharpen) return null
+        if (srcW <= 0 || srcH <= 0 || outW <= 0 || outH <= 0) return null
+        return try {
+            val restore = if (sharpen) shader(context, RESTORE) + shader(context, DARKEN) + shader(context, THIN) else emptyList()
+            val up = if (upscale) shader(context, UPSCALE) else emptyList()
+            val fin = if (sharpen) shader(context, FINAL) else emptyList()
+            val input = MpvTextureSize(srcW, srcH)
+            MpvUserShaderParser.plan(restore + up + fin, input, MpvTextureSize(outW, outH))
+                .toAnimeEnhancementStatus(input, restore + fin, up)
+        } catch (e: Exception) {
+            null
+        }
     }
 
     fun effects(context: Context, upscale: Boolean, sharpen: Boolean, tracker: AnimeShaderStatusTracker?): List<Effect> {
