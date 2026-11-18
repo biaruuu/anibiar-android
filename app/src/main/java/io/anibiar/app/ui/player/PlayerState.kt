@@ -119,6 +119,36 @@ class PlayerState(context: Context) {
     var autoNext by mutableStateOf(Prefs.getBool("player.autoNext", true))
     var autoSkip by mutableStateOf(Prefs.getBool("player.autoSkip", true))
 
+    /* ---------- Anime4K picture enhancement (2x upscaler + line sharpener) ---------- */
+
+    private val appCtx = context.applicationContext
+    var animeUpscale by mutableStateOf(Prefs.getBool("player.anime.upscale", true))
+    var animeSharpen by mutableStateOf(Prefs.getBool("player.anime.sharpen", true))
+
+    /** What the shaders are doing to the current picture; null while off or not yet running. */
+    var animeStatus by mutableStateOf<io.anibiar.app.anime.AnimeEnhancementStatus?>(null)
+    private val animeTracker = io.anibiar.app.anime.AnimeShaderStatusTracker { st ->
+        android.os.Handler(android.os.Looper.getMainLooper()).post { animeStatus = st }
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    fun applyAnime() {
+        if (released) return
+        try {
+            exo.setVideoEffects(io.anibiar.app.anime.AnimeShaders.effects(appCtx, animeUpscale, animeSharpen, animeTracker))
+        } catch (e: Throwable) {
+            android.util.Log.w("PlayerState", "Anime4K not applied", e)
+        }
+        if (!animeUpscale && !animeSharpen) animeStatus = null
+    }
+
+    @JvmName("applyAnimeUpscale")
+    fun setAnimeUpscale(v: Boolean) { animeUpscale = v; Prefs.putBool("player.anime.upscale", v); applyAnime() }
+    @JvmName("applyAnimeSharpen")
+    fun setAnimeSharpen(v: Boolean) { animeSharpen = v; Prefs.putBool("player.anime.sharpen", v); applyAnime() }
+
+    init { applyAnime() }
+
     /** Called when the viewer flips one of the three switches in the menu. */
     var onPrefsChanged: (() -> Unit)? = null
 

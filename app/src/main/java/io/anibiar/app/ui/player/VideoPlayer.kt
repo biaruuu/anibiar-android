@@ -560,6 +560,9 @@ private fun Menu(state: PlayerState, w: Float, maxHeight: Float) {
                         onClick = if (state.tracks.isEmpty()) null else ({ state.setMenuView("captions") }),
                     )
                     if (state.tracks.isNotEmpty()) MenuRow("Caption style", "", fs, chevron = true) { state.setMenuView("style") }
+                    MenuRow("Anime4K upscaler", if (state.animeUpscale) "On" else "Off", fs, chevron = false) { state.setAnimeUpscale(!state.animeUpscale) }
+                    MenuRow("Line sharpener", if (state.animeSharpen) "On" else "Off", fs, chevron = false) { state.setAnimeSharpen(!state.animeSharpen) }
+                    state.animeStatus?.let { MenuRow("Picture", it.summary, fs, chevron = false) {} }
                     MenuRow("Save a clip", "up to 1 min", fs, chevron = true) { state.openEditor() }
                     MenuRow("Speed", if (state.speed == 1f) "Normal" else "${state.speed}x", fs, chevron = true) { state.setMenuView("speed") }
                     MenuRow("Autoplay", if (state.autoplay) "On" else "Off", fs, chevron = false) { state.setAutoplay(!state.autoplay) }
